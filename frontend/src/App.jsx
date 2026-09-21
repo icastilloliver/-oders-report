@@ -20,6 +20,8 @@ import {
   Eye,
   EyeOff,
   ShoppingBag,
+  Radar,
+  TrendingUp,
 } from 'lucide-react';
 import KpiCards from './components/KpiCards.jsx';
 import BarChart from './components/BarChart.jsx';
@@ -28,7 +30,10 @@ import DeliveryChart from './components/DeliveryChart.jsx';
 import StoreRanking from './components/StoreRanking.jsx';
 import OrderSearch from './components/OrderSearch.jsx';
 import BulkOrderCheck from './components/BulkOrderCheck.jsx';
+import AtpDecomm from './components/AtpDecomm.jsx';
 import ErrorCodePie from './components/ErrorCodePie.jsx';
+import ErrorFulfillmentSplit from './components/ErrorFulfillmentSplit.jsx';
+import ErrorTrendChart from './components/ErrorTrendChart.jsx';
 import { KpiSkeleton, ChartSkeleton } from './components/Skeleton.jsx';
 
 /* ───────────────────────── helpers ───────────────────────── */
@@ -81,7 +86,9 @@ function App() {
   const [data, setData] = useState([]);
   const [previousData, setPreviousData] = useState([]);
   const [deliveryData, setDeliveryData] = useState(null); // { byDay, stores, totals }
-  const [errorCodes, setErrorCodes] = useState(null); // { data, total } · solo SBB Decomm
+  const [errorCodes, setErrorCodes] = useState(null); // { data, total } · tabs SBB/LP Decomm
+  const [fsplit, setFsplit] = useState(null); // error por tipo de surtido · solo LP Decomm
+  const [errorTrend, setErrorTrend] = useState(null); // serie diaria de errores · tabs Decomm
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [startDate, setStartDate] = useState('2026-04-01');
@@ -108,13 +115,14 @@ function App() {
     });
     if (company.includes('_BT_')) p.set('productType', 'Big Ticket');
     if (fulfillment !== 'all') p.set('fulfillmentType', fulfillment);
+    if (company === 'LP_DECOMM' && marketplace !== 'all') p.set('marketPlace', marketplace);
     return p.toString();
-  }, [startDate, endDate, company, fulfillment]);
+  }, [startDate, endDate, company, fulfillment, marketplace]);
 
   /* ── Fetch principal + rango previo (para tendencias) ── */
   const fetchData = useCallback(async () => {
-    /* Las vistas Buscar Orden y Cotejar manejan su propio fetch */
-    if (view === 'buscar' || view === 'cotejar') {
+    /* Las vistas Buscar Orden, Cotejar y Validación ATP manejan su propio fetch */
+    if (view === 'buscar' || view === 'cotejar' || view === 'atp') {
       setLoading(false);
       setError(null);
       return;
@@ -194,20 +202,41 @@ function App() {
         setPreviousData([]);
       }
 
-      /* Desglose por errorCode: solo la vista SBB Decomm lo muestra.
+      /* Desglose por errorCode: lo muestran los tabs SBB Decomm y LP Decomm.
          Guardamos el query junto al resultado: si cambian las fechas sin pulsar
          Actualizar, la descarga por segmento sigue trayendo lo que está pintado. */
-      if (company === 'SBB_DECOMM') {
+      if (company === 'SBB_DECOMM' || company === 'LP_DECOMM') {
         try {
-          const resCodes = await fetch(`/api/error-codes?${errorCodesQuery}`);
+          const [resCodes, resTrend] = await Promise.all([
+            fetch(`/api/error-codes?${errorCodesQuery}`),
+            fetch(`/api/error-trend?${errorCodesQuery}`),
+          ]);
           setErrorCodes(
             resCodes.ok ? { ...(await resCodes.json()), query: errorCodesQuery } : null
           );
+          setErrorTrend(resTrend.ok ? await resTrend.json() : null);
         } catch {
           setErrorCodes(null); // el desglose es complementario: no rompe la vista
+          setErrorTrend(null);
         }
       } else {
         setErrorCodes(null);
+        setErrorTrend(null);
+      }
+
+      /* Comparativa de error por tipo de surtido: exclusiva de LP Decomm.
+         No lleva el filtro de surtido (compara ambos), pero sí el de producto. */
+      if (company === 'LP_DECOMM') {
+        try {
+          const p = new URLSearchParams({ start: startDate, end: endDate, company: 'LP' });
+          if (marketplace !== 'all') p.set('marketPlace', marketplace);
+          const resSplit = await fetch(`/api/error-codes-fulfillment?${p}`);
+          setFsplit(resSplit.ok ? { ...(await resSplit.json()), query: p.toString() } : null);
+        } catch {
+          setFsplit(null); // complementaria: no rompe la vista
+        }
+      } else {
+        setFsplit(null);
       }
     } catch (err) {
       setError(err.message);
@@ -298,7 +327,7 @@ function App() {
   };
 
   /* Vistas globales: no dependen de compañía ni de rango de fechas */
-  const isGlobalView = view === 'buscar' || view === 'cotejar';
+  const isGlobalView = view === 'buscar' || view === 'cotejar' || view === 'atp';
 
   const rangeLabel = useMemo(() => {
     const opts = { day: '2-digit', month: 'short', year: 'numeric' };
@@ -316,6 +345,7 @@ function App() {
   }, [company]);
 
   const reportSource = useMemo(() => {
+    if (view === 'atp') return 'FAC_EDD_ORDERS_TRN → OMS EPLInventoryAvailabilityWebService';
     if (view === 'buscar' || view === 'cotejar') return 'FAC_EDD_ORDERS_TRN';
     if (view === 'entregas') {
       return company.includes('_BT_')
@@ -339,12 +369,20 @@ function App() {
           </div>
           <div>
             <h1>
-              Reporte Ejecutivo · Pedidos {siteTitle}
-              {view === 'planes' && company.includes('DECOMM') && !company.includes('_BT_') ? ' (Decomm)' : ''}
-              {view === 'planes' && company.includes('RECALC') ? ' (Recalculo)' : ''}
+              {view === 'atp' ? (
+                'Reporte Ejecutivo · Validación ATP Decomm'
+              ) : (
+                <>
+                  Reporte Ejecutivo · Pedidos {siteTitle}
+                  {view === 'planes' && company.includes('DECOMM') && !company.includes('_BT_') ? ' (Decomm)' : ''}
+                  {view === 'planes' && company.includes('RECALC') ? ' (Recalculo)' : ''}
+                </>
+              )}
             </h1>
             <p className="subtitle">
-              {view === 'cotejar'
+              {view === 'atp'
+                ? `Errores del query de decomm validados contra el OMS de Suburbia (disponibilidad ATP, timeout 20 s) · ${reportSource}`
+                : view === 'cotejar'
                 ? `Sube tu lista de órdenes y cotéjala: errorCode, porcentajes y no encontradas · ${reportSource}`
                 : view === 'buscar'
                 ? `Consulta una orden o remisión: SKUs, tiendas, fechas estimadas y tipo de entrega · ${reportSource}`
@@ -358,7 +396,7 @@ function App() {
         <div className="app-header__meta">
           <span className="dot" aria-hidden="true" />
           <Clock size={12} />
-          <span>{isGlobalView ? 'Últimos 6 meses' : rangeLabel}</span>
+          <span>{view === 'atp' ? 'Rango en la vista' : isGlobalView ? 'Últimos 6 meses' : rangeLabel}</span>
         </div>
       </header>
 
@@ -399,6 +437,15 @@ function App() {
         >
           <FileSpreadsheet size={14} strokeWidth={2.2} />
           Cotejar Lista
+        </button>
+        <button
+          role="tab"
+          aria-selected={view === 'atp'}
+          className={`view-switch__btn ${view === 'atp' ? 'active' : ''}`}
+          onClick={() => switchView('atp')}
+        >
+          <Radar size={14} strokeWidth={2.2} />
+          Validación ATP
         </button>
       </div>
 
@@ -666,6 +713,9 @@ function App() {
       {/* ─── Vista Cotejar Lista ─── */}
       {view === 'cotejar' && <BulkOrderCheck />}
 
+      {/* ─── Vista Validación ATP (decomm → OMS Suburbia) ─── */}
+      {view === 'atp' && <AtpDecomm />}
+
       {/* ─── Estados ─── */}
       {!isGlobalView && error && (
         <div className="alert alert--error" role="alert">
@@ -741,8 +791,8 @@ function App() {
             />
           </div>
 
-          {/* Desglose de errorCode · exclusivo de SBB Decomm */}
-          {company === 'SBB_DECOMM' && errorCodes && (
+          {/* Desglose de errorCode · tabs SBB Decomm y LP Decomm */}
+          {(company === 'SBB_DECOMM' || company === 'LP_DECOMM') && errorCodes && (
             <div className="chart-card">
               <div className="chart-card__head">
                 <div>
@@ -760,6 +810,9 @@ function App() {
                             : 'Surtido Liverpool'
                         }`
                       : ''}
+                    {company === 'LP_DECOMM' && marketplace !== 'all'
+                      ? ` · solo ${marketplace === 'true' ? 'Marketplace' : 'catálogo propio'}`
+                      : ''}
                     {' · '}descarga los registros de cada segmento con
                     <Download size={12} strokeWidth={2.4} className="subtitle__icon" />
                   </p>
@@ -770,6 +823,52 @@ function App() {
                 total={errorCodes.total}
                 csvQuery={errorCodes.query}
               />
+            </div>
+          )}
+
+          {/* Tendencia diaria de errores · tabs SBB Decomm y LP Decomm */}
+          {(company === 'SBB_DECOMM' || company === 'LP_DECOMM') &&
+            errorTrend &&
+            errorTrend.days?.length > 0 && (
+            <div className="chart-card">
+              <div className="chart-card__head">
+                <div>
+                  <h2>
+                    <TrendingUp size={18} strokeWidth={2.2} />
+                    Comportamiento diario de los errores
+                  </h2>
+                  <p className="subtitle">
+                    Evolución por causal — top 5 + Otros, con los mismos colores del catálogo que
+                    la dona · aplica los mismos filtros de surtido
+                    {company === 'LP_DECOMM' ? ' y producto' : ''} · pasa el cursor sobre un día
+                    para ver todas las series
+                  </p>
+                </div>
+              </div>
+              <ErrorTrendChart days={errorTrend.days} codes={errorTrend.codes} />
+            </div>
+          )}
+
+          {/* Error por tipo de surtido · exclusivo de LP Decomm */}
+          {company === 'LP_DECOMM' && fsplit && (
+            <div className="chart-card">
+              <div className="chart-card__head">
+                <div>
+                  <h2>
+                    <Truck size={18} strokeWidth={2.2} />
+                    Error por tipo de surtido
+                  </h2>
+                  <p className="subtitle">
+                    Entrega a domicilio vs Click &amp; Collect: tasa de error de cada segmento y
+                    sus causales lado a lado
+                    {marketplace !== 'all'
+                      ? ` · solo ${marketplace === 'true' ? 'Marketplace' : 'catálogo propio'}`
+                      : ''}
+                    {' '}· esta comparativa ignora el filtro de surtido de arriba
+                  </p>
+                </div>
+              </div>
+              <ErrorFulfillmentSplit data={fsplit.segments} csvQuery={fsplit.query} />
             </div>
           )}
         </>

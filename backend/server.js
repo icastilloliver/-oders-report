@@ -381,6 +381,7 @@ app.get('/api/error-codes', async (req, res) => {
     const company = req.query.company || 'SB';
     const productType = req.query.productType;
     const fulfillmentType = req.query.fulfillmentType;
+    const marketPlace = req.query.marketPlace; // 'true' | 'false' · filtro del tab LP Decomm
 
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(start) || !dateRegex.test(end)) {
@@ -389,6 +390,10 @@ app.get('/api/error-codes', async (req, res) => {
 
     if (fulfillmentType && !FULFILLMENT_TYPES.includes(fulfillmentType)) {
       return res.status(400).json({ error: 'fulfillmentType inválido' });
+    }
+
+    if (marketPlace && !['true', 'false'].includes(marketPlace)) {
+      return res.status(400).json({ error: 'marketPlace inválido (true|false)' });
     }
 
     const params = {
@@ -409,6 +414,12 @@ app.get('/api/error-codes', async (req, res) => {
       params.fulfillmentType = fulfillmentType;
     }
 
+    let filterMarketplace = '';
+    if (marketPlace) {
+      filterMarketplace = 'AND marketPlace = @marketPlace';
+      params.marketPlace = marketPlace === 'true';
+    }
+
     const query = `
       WITH base AS (
         SELECT
@@ -423,6 +434,7 @@ app.get('/api/error-codes', async (req, res) => {
         WHERE company = @company
           ${filterProductType}
           ${filterFulfillment}
+          ${filterMarketplace}
           AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
           AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
       )
@@ -477,6 +489,7 @@ app.get('/api/error-codes-csv', async (req, res) => {
     const company = req.query.company || 'SB';
     const productType = req.query.productType;
     const fulfillmentType = req.query.fulfillmentType;
+    const marketPlace = req.query.marketPlace;
 
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(start) || !dateRegex.test(end)) {
@@ -485,6 +498,10 @@ app.get('/api/error-codes-csv', async (req, res) => {
 
     if (fulfillmentType && !FULFILLMENT_TYPES.includes(fulfillmentType)) {
       return res.status(400).send('fulfillmentType inválido');
+    }
+
+    if (marketPlace && !['true', 'false'].includes(marketPlace)) {
+      return res.status(400).send('marketPlace inválido (true|false)');
     }
 
     const rawCodes = String(req.query.codes ?? '').trim();
@@ -529,6 +546,12 @@ app.get('/api/error-codes-csv', async (req, res) => {
       params.codes = codes;
     }
 
+    let filterMarketplace = '';
+    if (marketPlace) {
+      filterMarketplace = 'AND marketPlace = @marketPlace';
+      params.marketPlace = marketPlace === 'true';
+    }
+
     const query = `
       WITH base AS (
         SELECT
@@ -543,6 +566,7 @@ app.get('/api/error-codes-csv', async (req, res) => {
         WHERE company = @company
           ${filterProductType}
           ${filterFulfillment}
+          ${filterMarketplace}
           AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
           AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
       )
@@ -1066,6 +1090,557 @@ app.get('/api/orders-csv', async (req, res) => {
   } catch (error) {
     console.error('BigQuery CSV Export error:', error);
     res.status(500).send('Error generando CSV: ' + error.message);
+  }
+});
+
+// ─── Tendencia diaria de errores por causal (tabs Decomm) ──────────
+// Serie por día: cuántas líneas Error trae cada errorCode, más el total de
+// líneas y errores del día (para graficar también como % del día). Acepta
+// los MISMOS filtros que /api/error-codes para que cuadre con la dona.
+app.get('/api/error-trend', async (req, res) => {
+  try {
+    const start = req.query.start || '2026-05-01';
+    const end = req.query.end || '2026-05-28';
+    const company = req.query.company || 'SB';
+    const productType = req.query.productType;
+    const fulfillmentType = req.query.fulfillmentType;
+    const marketPlace = req.query.marketPlace;
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(start) || !dateRegex.test(end)) {
+      return res.status(400).json({ error: 'Formato de fecha inválido' });
+    }
+    if (fulfillmentType && !FULFILLMENT_TYPES.includes(fulfillmentType)) {
+      return res.status(400).json({ error: 'fulfillmentType inválido' });
+    }
+    if (marketPlace && !['true', 'false'].includes(marketPlace)) {
+      return res.status(400).json({ error: 'marketPlace inválido (true|false)' });
+    }
+
+    const params = {
+      start: `${start} 00:00:00`,
+      end: `${end} 00:00:00`,
+      company,
+    };
+
+    let filterProductType = '';
+    if (productType) {
+      filterProductType = 'AND UPPER(TRIM(productType)) IN UNNEST(@productTypes)';
+      params.productTypes = productTypeVariants(productType);
+    }
+    let filterFulfillment = '';
+    if (fulfillmentType) {
+      filterFulfillment = 'AND fulfillmentType = @fulfillmentType';
+      params.fulfillmentType = fulfillmentType;
+    }
+    let filterMarketplace = '';
+    if (marketPlace) {
+      filterMarketplace = 'AND marketPlace = @marketPlace';
+      params.marketPlace = marketPlace === 'true';
+    }
+
+    const baseCTE = `
+      WITH base AS (
+        SELECT
+          FORMAT_TIMESTAMP('%Y-%m-%d', ingestionTimestamp, 'America/Mexico_City') AS Fecha,
+          ${ERROR_CODE_NORM_SQL} AS errorCode,
+          CASE
+            WHEN plan = 'B' THEN 'Plan B'
+            WHEN plan = 'A' AND edd1 IS NOT NULL AND edd2 IS NOT NULL THEN 'Plan A'
+            ELSE 'Error'
+          END AS clasificacion
+        FROM \`crp-pro-dig-edd.mus_pro_digital_prd_tbls.FAC_EDD_ORDERS_TRN\`
+        WHERE company = @company
+          ${filterProductType}
+          ${filterFulfillment}
+          ${filterMarketplace}
+          AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
+          AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
+      )
+    `;
+
+    const queryDays = `${baseCTE}
+      SELECT
+        Fecha,
+        COUNT(*)                         AS total,
+        COUNTIF(clasificacion = 'Error') AS errores
+      FROM base
+      GROUP BY Fecha
+      ORDER BY Fecha
+    `;
+
+    const queryCodes = `${baseCTE}
+      SELECT Fecha, errorCode, COUNT(*) AS total
+      FROM base
+      WHERE clasificacion = 'Error'
+      GROUP BY Fecha, errorCode
+      ORDER BY Fecha
+    `;
+
+    const [[dayRows], [codeRows]] = await Promise.all([
+      bigquery.query({ query: queryDays, params, projectId: 'crp-pro-dig-edd' }),
+      bigquery.query({ query: queryCodes, params, projectId: 'crp-pro-dig-edd' }),
+    ]);
+
+    res.json({
+      days: dayRows.map((r) => ({
+        Fecha: r.Fecha,
+        total: Number(r.total),
+        errores: Number(r.errores),
+      })),
+      codes: codeRows.map((r) => ({
+        Fecha: r.Fecha,
+        errorCode: r.errorCode,
+        total: Number(r.total),
+      })),
+      range: { start, end },
+      company,
+    });
+  } catch (error) {
+    console.error('BigQuery Error Trend error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Error codes por tipo de surtido (LP Decomm) ───────────────────
+// Desglosa el % Error en dos cortes a la vez: composición por errorCode
+// DENTRO de cada tipo de surtido (domicilio vs Click & Collect), más el
+// tamaño y la tasa de error de cada segmento para poder compararlos.
+// Mismo CASE de clasificación que /api/orders-decomm: los totales cuadran
+// con el KPI y la barra de % Error de la vista.
+const FULFILLMENT_BUCKET_SQL = `
+        CASE fulfillmentType
+          WHEN 'Fulfillment_Type_Liverpool' THEN 'domicilio'
+          WHEN 'Liverpool_CNC_PICK_PACK'    THEN 'cnc'
+          ELSE 'otro'
+        END`;
+
+app.get('/api/error-codes-fulfillment', async (req, res) => {
+  try {
+    const start = req.query.start || '2026-05-01';
+    const end = req.query.end || '2026-05-28';
+    const company = req.query.company || 'LP';
+    const marketPlace = req.query.marketPlace; // 'true' | 'false' · opcional
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(start) || !dateRegex.test(end)) {
+      return res.status(400).json({ error: 'Formato de fecha inválido' });
+    }
+    if (marketPlace && !['true', 'false'].includes(marketPlace)) {
+      return res.status(400).json({ error: 'marketPlace inválido (true|false)' });
+    }
+
+    const params = {
+      start: `${start} 00:00:00`,
+      end: `${end} 00:00:00`,
+      company,
+    };
+
+    let filterMarketplace = '';
+    if (marketPlace) {
+      filterMarketplace = 'AND marketPlace = @marketPlace';
+      params.marketPlace = marketPlace === 'true';
+    }
+
+    const baseCTE = `
+      WITH base AS (
+        SELECT
+          ${FULFILLMENT_BUCKET_SQL} AS segmento,
+          ${ERROR_CODE_NORM_SQL} AS errorCode,
+          errorMessage,
+          CASE
+            WHEN plan = 'B' THEN 'Plan B'
+            WHEN plan = 'A' AND edd1 IS NOT NULL AND edd2 IS NOT NULL THEN 'Plan A'
+            ELSE 'Error'
+          END AS clasificacion
+        FROM \`crp-pro-dig-edd.mus_pro_digital_prd_tbls.FAC_EDD_ORDERS_TRN\`
+        WHERE company = @company
+          ${filterMarketplace}
+          AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
+          AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
+      )
+    `;
+
+    // Tamaño y tasa de error por segmento (sobre TODAS las líneas del rango)
+    const queryTotals = `${baseCTE}
+      SELECT
+        segmento,
+        COUNT(*)                             AS total,
+        COUNTIF(clasificacion = 'Error')     AS errores
+      FROM base
+      GROUP BY segmento
+    `;
+
+    // Composición por errorCode dentro del % Error de cada segmento
+    const queryCodes = `${baseCTE}
+      SELECT
+        segmento,
+        errorCode,
+        ANY_VALUE(NULLIF(TRIM(errorMessage), '')) AS errorMessage,
+        COUNT(*)                                  AS total
+      FROM base
+      WHERE clasificacion = 'Error'
+      GROUP BY segmento, errorCode
+      ORDER BY segmento, total DESC
+    `;
+
+    const [[totalRows], [codeRows]] = await Promise.all([
+      bigquery.query({ query: queryTotals, params, projectId: 'crp-pro-dig-edd' }),
+      bigquery.query({ query: queryCodes, params, projectId: 'crp-pro-dig-edd' }),
+    ]);
+
+    const segments = {
+      domicilio: { total: 0, errores: 0, codes: [] },
+      cnc: { total: 0, errores: 0, codes: [] },
+      otro: { total: 0, errores: 0, codes: [] },
+    };
+    for (const r of totalRows) {
+      const seg = segments[r.segmento];
+      if (!seg) continue;
+      seg.total = Number(r.total);
+      seg.errores = Number(r.errores);
+    }
+    for (const r of codeRows) {
+      const seg = segments[r.segmento];
+      if (!seg) continue;
+      seg.codes.push({
+        errorCode: r.errorCode,
+        errorMessage: r.errorMessage || null,
+        total: Number(r.total),
+      });
+    }
+
+    res.json({ segments, range: { start, end }, company, marketPlace: marketPlace ?? null });
+  } catch (error) {
+    console.error('BigQuery Error Codes Fulfillment error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Validación ATP contra OMS Suburbia (solo SBB Decomm) ──────────
+// Reemplaza el flujo manual de exportar el CSV de decomm y correr un script:
+// /api/atp-decomm-rows trae del query las filas clasificadas como Error y
+// /api/atp-validate consulta EPLInventoryAvailabilityWebService (el
+// envoltorio del API core `promise` de Sterling) por cada SKU/cantidad/CP.
+// El servicio SOLO existe para Suburbia: company distinta de 'SB' se rechaza.
+const OMS_ATP_URL =
+  process.env.OMS_ATP_URL ||
+  'https://oms.suburbia.com.mx/smcfs/restapi/executeFlow/EPLInventoryAvailabilityWebService';
+// Sin fallback en código: la credencial vive SOLO en backend/.env (gitignoreado).
+const OMS_ATP_AUTH = process.env.OMS_ATP_AUTH || '';
+const ATP_TIMEOUT_MS = 20000; // default: sin respuesta en 20 s = TIMEOUT (configurable por petición)
+const ATP_TIMEOUT_MIN_S = 5;
+const ATP_TIMEOUT_MAX_S = 60;
+const ATP_MAX_ITEMS = 20; // por petición HTTP (el frontend manda lotes de 10)
+const ATP_CONCURRENCY = 5; // llamadas simultáneas hacia OMS
+const ATP_ROWS_LIMIT = 3000;
+
+const xmlEscape = (s) =>
+  String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+
+const atpPromiseXML = ({ sku, quantity, zipCode }) => `<Promise
+        AllocationRuleID="EPLSCHRULE"
+        OrganizationCode="SUBURBIA"
+        >
+    <ShipToAddress ZipCode="${xmlEscape(zipCode)}" Country="MX" />
+    <PromiseLines>
+        <PromiseLine
+            CarrierServiceCode="SUBGROUNDSL"
+            DeliveryMethod="SHP"
+            ShipNode=""
+            FulfillmentType="SHIP"
+            ItemID="${xmlEscape(sku)}"
+            LineId="1"
+            RequiredQty="${xmlEscape(quantity)}"
+            ProductClass="GOOD"
+            UnitOfMeasure="PI"
+            ReqStartDate=""
+            ExtnNoSpotService=""
+            ExtnItemType=""
+            ItemType="SL"
+        />
+    </PromiseLines>
+</Promise>`;
+
+const atpAttr = (tag, name) => {
+  const m = new RegExp(`\\b${name}="([^"]*)"`).exec(tag || '');
+  return m ? m[1] : '';
+};
+
+/** Clasifica la respuesta XML de OMS.
+ *  El error NOT_ENOUGH_PRODUCT_CHOICES NO llega como <Errors>: viene en
+ *  HTTP 200 dentro de <UnavailableLine UnavailableReason="…"> después de que
+ *  el motor agota la lista de nodos (por eso esas respuestas tardan 15-20 s). */
+const classifyAtp = (text) => {
+  if (text.includes('NOT_ENOUGH_PRODUCT_CHOICES')) {
+    const nodos = (text.match(/capacity for node is available/g) || []).length;
+    return {
+      status: 'NOT_ENOUGH_PRODUCT_CHOICES',
+      errorCode: 'NOT_ENOUGH_PRODUCT_CHOICES',
+      errorMessage: nodos
+        ? `Sin inventario/capacidad en ${nodos} nodos evaluados`
+        : 'UnavailableLine sin opciones de producto',
+      shipNode: '',
+      deliveryDate: '',
+    };
+  }
+  if (/<SuggestedOption>[\s\S]*?<Option[\s>]/.test(text)) {
+    const assignment = (text.match(/<Assignment\b[^>]*>/) || [''])[0];
+    const option = (text.match(/<Option\b[^>]*>/) || [''])[0];
+    return {
+      status: 'CORRECTO',
+      errorCode: '',
+      errorMessage: '',
+      shipNode: atpAttr(assignment, 'ShipNode'),
+      deliveryDate: atpAttr(assignment, 'DeliveryDate') || atpAttr(option, 'FirstDate'),
+    };
+  }
+  const errTag = (text.match(/<Error\b[^>]*>/) || [''])[0];
+  return {
+    status: 'OTRO_ERROR',
+    errorCode: atpAttr(errTag, 'ErrorCode') || 'RESPUESTA_DESCONOCIDA',
+    errorMessage:
+      atpAttr(errTag, 'ErrorDescription') || text.slice(0, 300).replace(/\s+/g, ' ').trim(),
+    shipNode: '',
+    deliveryDate: '',
+  };
+};
+
+const callAtp = async (item, timeoutMs = ATP_TIMEOUT_MS) => {
+  const startedAt = Date.now();
+  const seconds = () => Math.round((Date.now() - startedAt) / 10) / 100;
+  try {
+    // Sin cookies y con User-Agent tipo curl: las cookies de Akamai y el UA
+    // por defecto de Node hacen que el WAF cuelgue la conexión.
+    const resp = await fetch(OMS_ATP_URL, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/xml',
+        'Content-Type': 'application/xml',
+        Authorization: OMS_ATP_AUTH,
+        'User-Agent': 'curl/8.7.1',
+      },
+      body: atpPromiseXML(item),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const text = await resp.text();
+    if (!resp.ok) {
+      return {
+        status: 'OTRO_ERROR',
+        errorCode: `HTTP_${resp.status}`,
+        errorMessage: text.slice(0, 300).replace(/\s+/g, ' ').trim(),
+        shipNode: '',
+        deliveryDate: '',
+        httpStatus: resp.status,
+        seconds: seconds(),
+      };
+    }
+    return { ...classifyAtp(text), httpStatus: resp.status, seconds: seconds() };
+  } catch (e) {
+    if (e.name === 'TimeoutError' || e.name === 'AbortError') {
+      return {
+        status: 'TIMEOUT',
+        errorCode: '',
+        errorMessage: `Sin respuesta en ${timeoutMs / 1000} s`,
+        shipNode: '',
+        deliveryDate: '',
+        httpStatus: null,
+        seconds: seconds(),
+      };
+    }
+    // oms.suburbia.com.mx solo resuelve en la red corporativa/VPN: fuera de
+    // ella (p.ej. Cloud Run sin VPC connector) el fetch muere en DNS.
+    const noRoute = e.cause?.code === 'ENOTFOUND' || e.cause?.code === 'EAI_AGAIN';
+    return {
+      status: 'OTRO_ERROR',
+      errorCode: noRoute ? 'DNS_NO_ROUTE' : 'CONNECTION_ERROR',
+      errorMessage: noRoute
+        ? 'No se resolvió el host de OMS: el servicio solo es alcanzable desde la red corporativa/VPN'
+        : e.message || String(e),
+      shipNode: '',
+      deliveryDate: '',
+      httpStatus: null,
+      seconds: seconds(),
+    };
+  }
+};
+
+/** Pool de concurrencia simple que conserva el orden de entrada */
+const atpPool = async (items, worker, size) => {
+  const results = new Array(items.length);
+  let next = 0;
+  const lanes = Array.from({ length: Math.min(size, items.length) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await worker(items[i]);
+    }
+  });
+  await Promise.all(lanes);
+  return results;
+};
+
+// Filas del query de decomm clasificadas como Error: los candidatos a validar.
+// Misma tabla y mismo CASE que /api/orders-decomm para que el universo cuadre.
+app.get('/api/atp-decomm-rows', async (req, res) => {
+  try {
+    const start = req.query.start || '2026-09-08';
+    const end = req.query.end || '2026-09-10';
+    const company = String(req.query.company || 'SB').toUpperCase();
+    const fulfillmentType = req.query.fulfillmentType;
+
+    // Fecha de calendario real, no solo con la forma correcta: '2026-02-31'
+    // pasaría el regex y reventaría en BigQuery como 500.
+    const isRealDate = (s) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
+    if (!isRealDate(start) || !isRealDate(end)) {
+      return res.status(400).json({ error: 'Fecha inválida (usa YYYY-MM-DD de calendario real)' });
+    }
+    if (!/^[A-Z]{2,4}$/.test(company)) {
+      return res.status(400).json({ error: 'company inválida' });
+    }
+    if (fulfillmentType && !FULFILLMENT_TYPES.includes(fulfillmentType)) {
+      return res.status(400).json({ error: 'fulfillmentType inválido' });
+    }
+
+    const params = {
+      start: `${start} 00:00:00`,
+      end: `${end} 00:00:00`,
+      company,
+    };
+
+    let filterFulfillment = '';
+    if (fulfillmentType) {
+      filterFulfillment = 'AND fulfillmentType = @fulfillmentType';
+      params.fulfillmentType = fulfillmentType;
+    }
+
+    const query = `
+      WITH base AS (
+        SELECT
+          recordId,
+          orderNumber,
+          sku,
+          quantity,
+          zipCode,
+          destinationCity,
+          channel,
+          fulfillmentType,
+          productType,
+          FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', createdAt, 'America/Mexico_City') AS createdAt,
+          errorCode,
+          errorMessage,
+          CASE
+            WHEN plan = 'B' THEN 'Plan B'
+            WHEN plan = 'A' AND edd1 IS NOT NULL AND edd2 IS NOT NULL THEN 'Plan A'
+            ELSE 'Error'
+          END AS clasificacion
+        FROM \`crp-pro-dig-edd.mus_pro_digital_prd_tbls.FAC_EDD_ORDERS_TRN\`
+        WHERE company = @company
+          ${filterFulfillment}
+          AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
+          AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
+      )
+      SELECT * EXCEPT(clasificacion) FROM base
+      WHERE clasificacion = 'Error'
+      ORDER BY createdAt
+      LIMIT ${ATP_ROWS_LIMIT + 1}
+    `;
+
+    const [rows] = await bigquery.query({ query, params, projectId: 'crp-pro-dig-edd' });
+
+    const truncated = rows.length > ATP_ROWS_LIMIT;
+    const data = (truncated ? rows.slice(0, ATP_ROWS_LIMIT) : rows).map((r) => ({
+      ...r,
+      quantity: r.quantity === null || r.quantity === undefined ? '' : String(r.quantity),
+      zipCode: r.zipCode === null || r.zipCode === undefined ? '' : String(r.zipCode),
+    }));
+
+    res.json({ rows: data, total: data.length, truncated, range: { start, end }, company });
+  } catch (error) {
+    console.error('BigQuery ATP rows error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Valida un lote de combinaciones sku/cantidad/CP contra OMS Suburbia.
+app.post('/api/atp-validate', async (req, res) => {
+  try {
+    const company = String(req.body?.company || '').toUpperCase();
+    if (company !== 'SB') {
+      return res.status(400).json({
+        error:
+          'La validación ATP usa el OMS de Suburbia (EPLInventoryAvailabilityWebService): solo aplica a SBB Decomm.',
+      });
+    }
+
+    const raw = Array.isArray(req.body?.items) ? req.body.items : null;
+    if (!raw || raw.length === 0) {
+      return res.status(400).json({ error: 'Envía un arreglo items con al menos un elemento' });
+    }
+    if (raw.length > ATP_MAX_ITEMS) {
+      return res
+        .status(400)
+        .json({ error: `Máximo ${ATP_MAX_ITEMS} items por petición. Divide el lote.` });
+    }
+
+    const items = raw.map((it) => {
+      const skuOriginal = String(it?.sku ?? '').trim();
+      // Los SKU de Suburbia vienen con prefijo SB en la tabla; OMS lo espera sin él.
+      const sku = skuOriginal.replace(/^SB/i, '');
+      const qty = parseInt(it?.quantity, 10);
+      const quantity = String(Number.isFinite(qty) && qty > 0 ? Math.min(qty, 999) : 1);
+      const zipCode = String(it?.zipCode ?? '').trim();
+      return { skuOriginal, sku, quantity, zipCode };
+    });
+
+    if (!OMS_ATP_AUTH) {
+      return res.status(503).json({
+        error: 'Falta OMS_ATP_AUTH en backend/.env (credencial Basic del OMS de Suburbia).',
+      });
+    }
+
+    // Timeout configurable por petición (viene de la UI), acotado a un rango
+    // sano: <5 s marca todo como TIMEOUT, >60 s cuelga los lotes demasiado.
+    const rawTimeout = parseInt(req.body?.timeoutSeconds, 10);
+    const timeoutSeconds = Number.isFinite(rawTimeout)
+      ? Math.min(ATP_TIMEOUT_MAX_S, Math.max(ATP_TIMEOUT_MIN_S, rawTimeout))
+      : ATP_TIMEOUT_MS / 1000;
+    const timeoutMs = timeoutSeconds * 1000;
+
+    // Un item inválido NO tumba el lote: se regresa como resultado individual
+    // (en la tabla hay filas reales con SKU corto, p.ej. SB991, que no deben
+    // detener la validación de las demás).
+    const results = await atpPool(
+      items,
+      async (it) => {
+        const base = {
+          sku: it.skuOriginal,
+          skuConsultado: it.sku,
+          quantity: it.quantity,
+          zipCode: it.zipCode,
+        };
+        if (!/^[A-Za-z0-9]{4,20}$/.test(it.sku) || !/^\d{4,5}$/.test(it.zipCode)) {
+          return {
+            ...base,
+            status: 'OTRO_ERROR',
+            errorCode: 'DATOS_INVALIDOS',
+            errorMessage: 'SKU o CP inválido: no se consultó OMS',
+            shipNode: '',
+            deliveryDate: '',
+            httpStatus: null,
+            seconds: 0,
+          };
+        }
+        return { ...base, ...(await callAtp(it, timeoutMs)) };
+      },
+      ATP_CONCURRENCY
+    );
+
+    res.json({ results, timeoutSeconds });
+  } catch (error) {
+    console.error('ATP validate error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

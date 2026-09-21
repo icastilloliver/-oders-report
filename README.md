@@ -92,6 +92,35 @@ Lo consume la gráfica de dona de la pestaña **SBB Decomm** (vista Planes A/B),
 que se refresca con el rango de fechas y el filtro de tipo de surtido. Muestra
 los 8 códigos más frecuentes y agrupa el resto en «Otros».
 
+### Tendencia diaria de errores (tabs Decomm)
+
+`GET /api/error-trend?start&end&company&fulfillmentType&marketPlace` — serie por
+día de líneas Error por `errorCode` + total de líneas/errores del día. Acepta
+los mismos filtros que `/api/error-codes` para cuadrar con la dona. La tarjeta
+**Comportamiento diario de los errores** (tabs SBB y LP Decomm) la grafica como
+líneas por causal (top 5 + «Otros» punteado, colores del catálogo) con dos
+modos — registros por día y % de las líneas del día (la suma de series = %
+Error diario) — tooltip de columna completa, nota del día pico y tabla gemela.
+
+### Métricas de error en LP Decomm
+
+El tab **LP Decomm** (vista Planes A/B) muestra, además de los KPIs y la
+gráfica diaria:
+
+- **Composición del % Error por errorCode** — la misma dona de SBB Decomm
+  (`/api/error-codes`), ahora también para LP y respetando el filtro de tipo
+  de producto (`marketPlace`), con descarga CSV por rebanada.
+- **Error por tipo de surtido** — `GET /api/error-codes-fulfillment?start&end&company=LP&marketPlace=`
+  compara Entrega a domicilio (`Fulfillment_Type_Liverpool`) vs Click & Collect
+  (`Liverpool_CNC_PICK_PACK`): tasa de error de cada segmento (errores / líneas
+  totales del segmento) y tabla de causales lado a lado con el % dentro del
+  Error de cada surtido, barras por código (colores del catálogo) y descarga
+  CSV por causal + segmento. Las líneas con otro fulfillmentType se reportan
+  en una nota y sí cuentan en la dona. Esta comparativa ignora el filtro de
+  surtido (compara ambos), pero respeta el de producto.
+- Los totales cuadran entre sí: dona = domicilio + C&C + otros, con el mismo
+  `CASE` de clasificación que `/api/orders-decomm`.
+
 ### Cotejo masivo de órdenes
 
 `POST /api/orders-bulk-check`
@@ -130,3 +159,47 @@ columnas `_estatus`, `_errorCode`, `_errorMessage`, `_plan`, `_edd1`, `_edd2`,
 
 El cotejo por par remisión + SKU compara los SKU ignorando ceros a la izquierda.
 Si se deja la columna de SKU en «Cotejar solo por orden», el veredicto es por orden.
+
+### Validación ATP (SBB Decomm → OMS Suburbia)
+
+La pestaña **Validación ATP** automatiza el flujo que antes se hacía a mano
+(exportar el CSV de decomm y correr un script): trae directo del query las
+filas clasificadas como **Error** y las valida contra el OMS de Suburbia.
+
+- `GET /api/atp-decomm-rows?start&end&company=SB|LP` — filas Error de
+  `FAC_EDD_ORDERS_TRN` (mismo `CASE` que `/api/orders-decomm`), máximo 3,000
+  por rango (`truncated: true` si se cortó).
+- `POST /api/atp-validate` — `{ company: 'SB', items: [{ sku, quantity, zipCode }] }`
+  (máx. 20 por petición; el frontend manda lotes de 10). Por cada combinación
+  única SKU + cantidad + CP llama a `EPLInventoryAvailabilityWebService`
+  (envoltorio del API core `promise` de Sterling) con **timeout configurable
+  desde la UI** (`timeoutSeconds` en el body; 5-60 s, default 20 — el backend
+  acota el rango y el valor se recuerda en el navegador) y clasifica la
+  respuesta:
+
+  | Estatus | Significado |
+  |---|---|
+  | `CORRECTO` | La respuesta trae `<SuggestedOption><Option>` con nodo y fecha promesa |
+  | `NOT_ENOUGH_PRODUCT_CHOICES` | `UnavailableLine`: el motor agotó los nodos sin inventario/capacidad (estas respuestas tardan 15-20 s) |
+  | `TIMEOUT` | Sin respuesta en 20 s (suelen ser NEPC lentos: conviene revalidar) |
+  | `OTRO_ERROR` | Cualquier otra respuesta (se reporta `ErrorCode`/mensaje) |
+
+  El prefijo `SB` del SKU se quita antes de consultar OMS (`SB5014548396` →
+  `5014548396`). La llamada va sin cookies y con User-Agent tipo curl: las
+  cookies de Akamai y el UA por defecto de Node hacen que el WAF cuelgue la
+  conexión.
+
+- **Solo aplica a SBB Decomm**: el servicio no existe para Liverpool, así que
+  con `company=LP` el endpoint de validación responde 400 y la vista solo
+  muestra/exporta el detalle de errores del query.
+- La exportación CSV conserva las columnas del query y agrega `_atpEstatus`,
+  `_atpErrorCode`, `_atpMensaje`, `_atpNodo`, `_atpFechaEntrega` y `_atpSegundos`.
+- **Config requerida** en `backend/.env`: `OMS_ATP_AUTH` (credencial Basic del
+  OMS; sin ella `/api/atp-validate` responde 503). `OMS_ATP_URL` es opcional.
+  La credencial NO vive en el código ni en `.env.example`.
+- **Solo funciona desde la red corporativa/VPN**: `oms.suburbia.com.mx` no
+  resuelve en DNS público (la vista lo reporta como `DNS_NO_ROUTE`). Para
+  Cloud Run haría falta un VPC connector + zona DNS privada hacia la red de
+  Liverpool; hoy la validación está pensada para correr local.
+- Un SKU/CP inválido en el lote (p. ej. `SB991`) no detiene la corrida: se
+  reporta individualmente como `DATOS_INVALIDOS` y el resto se valida normal.

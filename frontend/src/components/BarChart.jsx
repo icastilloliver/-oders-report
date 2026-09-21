@@ -20,7 +20,10 @@ function BarChart({ data, hideError = false }) {
   // Lee la fuente y los colores desde las CSS custom properties para
   // mantener consistencia con el resto del dashboard.
   const root = getComputedStyle(document.documentElement);
-  const brandColor = root.getPropertyValue('--brand-primary').trim() || '#e10098';
+  const brandColor =
+    root.getPropertyValue('--plan-a').trim() ||
+    root.getPropertyValue('--brand-primary').trim() ||
+    '#e10098';
   const planBColor = root.getPropertyValue('--plan-b').trim() || '#f59e0b';
   const errorColor = root.getPropertyValue('--error').trim() || '#ef4444';
   const text3 = root.getPropertyValue('--text-3').trim() || '#6b7280';
