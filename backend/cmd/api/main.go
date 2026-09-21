@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 	_ "time/tzdata" // embebe la base de timezones para que LoadLocation funcione sin tzdata del SO
 
 	"github.com/joho/godotenv"
@@ -38,6 +39,13 @@ func main() {
 	ordersRepository := repository.NewOrdersRepository(client)
 	ordersService := services.NewOrdersService(ordersRepository)
 	ordersHandler := transport.NewOrdersHandler(ordersService)
+
+	// Health check (paridad con el Express original): sirve para saber si el
+	// backend ya terminó de compilar/arrancar antes de pegarle desde la UI.
+	http.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"status":"ok","timestamp":%q}`, time.Now().UTC().Format(time.RFC3339))
+	})
 
 	http.HandleFunc("/api/orders-decomm", ordersHandler.HandlerOrdersSummary)
 	http.HandleFunc("/api/orders-recalculate", ordersHandler.HandlerRecalculateOrders)

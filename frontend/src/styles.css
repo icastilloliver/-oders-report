@@ -41,9 +41,10 @@
   --info-rgb: 55, 171, 198;
   --info-soft: #ebf7f9;
 
-  /* Categorías del reporte (colores propios, independientes de --brand-primary;
-     --plan-a referencia --success para que TODO verde del sitio sea uno solo) */
-  --plan-a: var(--success);
+  /* Categorías del reporte (colores propios, independientes de --brand-primary).
+     Plan A en malva #ac75a4: contrasta con el rosa de marca sin pelearse con
+     él, y deja el verde --success reservado para estados de éxito. */
+  --plan-a: #ac75a4;
   --plan-b: #f0b133;
   --error: #ff3333;
 
