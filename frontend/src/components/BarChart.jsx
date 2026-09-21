@@ -20,16 +20,12 @@ function BarChart({ data, hideError = false }) {
   // Lee la fuente y los colores desde las CSS custom properties para
   // mantener consistencia con el resto del dashboard.
   const root = getComputedStyle(document.documentElement);
-  const brandColor =
-    root.getPropertyValue('--plan-a').trim() ||
-    root.getPropertyValue('--brand-primary').trim() ||
-    '#e10098';
-  const planBColor = root.getPropertyValue('--plan-b').trim() || '#f59e0b';
-  const errorColor = root.getPropertyValue('--error').trim() || '#ef4444';
-  const text3 = root.getPropertyValue('--text-3').trim() || '#6b7280';
-  const border = root.getPropertyValue('--border').trim() || '#e6e8eb';
-  const fontFamily =
-    "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  const planAColor = root.getPropertyValue('--plan-a').trim() || '#09ac38';
+  const planBColor = root.getPropertyValue('--plan-b').trim() || '#f0b133';
+  const errorColor = root.getPropertyValue('--error').trim() || '#ff3333';
+  const text3 = root.getPropertyValue('--text-3').trim() || '#767676';
+  const border = root.getPropertyValue('--border').trim() || '#ebebeb';
+  const fontFamily = root.getPropertyValue('--font-sans').trim() || 'Roboto, sans-serif';
 
   const labels = data.map((d) => {
     const [y, m, day] = d.Fecha.split('-');
@@ -46,7 +42,7 @@ function BarChart({ data, hideError = false }) {
       label: 'Plan A',
       data: pctA,
       absolute: data.map((d) => d.Plan_A),
-      backgroundColor: brandColor,
+      backgroundColor: planAColor,
       borderRadius: { topLeft: 4, topRight: 4 },
       borderSkipped: false,
     },
@@ -120,7 +116,7 @@ function BarChart({ data, hideError = false }) {
         grid: { display: false },
         border: { color: border },
         ticks: {
-          font: { family: fontFamily, size: 10, weight: '500' },
+          font: { family: fontFamily, size: 10, weight: '600' },
           color: text3,
           maxRotation: 45,
           minRotation: 45,
@@ -133,7 +129,7 @@ function BarChart({ data, hideError = false }) {
         grid: { color: border, drawTicks: false },
         border: { display: false },
         ticks: {
-          font: { family: fontFamily, size: 11 },
+          font: { family: fontFamily, size: 12 },
           color: text3,
           stepSize: 20,
           padding: 8,

@@ -1,24 +1,32 @@
 # Etapa 1: Construir el Frontend
-FROM node:22-alpine as frontend-builder
+FROM node:22-alpine AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm install
 COPY frontend/ ./
 RUN npm run build
 
-# Etapa 2: Backend y Ejecución
-FROM node:22-alpine
+# Etapa 2: Compilar el backend (Go)
+FROM golang:1.23-alpine AS backend-builder
+# go.mod pide una versión de toolchain más nueva que la de esta imagen base;
+# con GOTOOLCHAIN=auto, `go` la descarga sola en build time en vez de fallar.
+ENV GOTOOLCHAIN=auto
+WORKDIR /app/backend
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/api
+
+# Etapa 3: Runtime — un solo binario Go que expone /api/* y sirve el
+# frontend ya compilado (ver internal/transport/static.go). Ya no hay
+# proceso Node en producción.
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
 WORKDIR /app
-COPY backend/package*.json ./backend/
-RUN cd backend && npm install --production
-COPY backend/ ./backend/
-# Copia los archivos construidos del frontend a la carpeta dist del backend
-COPY --from=frontend-builder /app/frontend/dist ./backend/dist
+COPY --from=backend-builder /app/server ./server
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Variables de entorno por defecto para Cloud Run
-ENV PORT=3001
-ENV BQ_LOCATION=US
-ENV GCP_PROJECT_ID=fechaestimadaentregaprod
+ENV STATIC_DIR=/app/frontend/dist
 
-EXPOSE 3001
-CMD ["node", "backend/server.js"]
+EXPOSE 8080
+CMD ["./server"]

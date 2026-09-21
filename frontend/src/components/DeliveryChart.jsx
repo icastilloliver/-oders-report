@@ -23,15 +23,14 @@ const monthAbbr = [
  */
 function DeliveryChart({ data }) {
   const root = getComputedStyle(document.documentElement);
-  const flashColor = root.getPropertyValue('--viz-flash').trim() || '#e10098';
-  const nextdayColor = root.getPropertyValue('--viz-nextday').trim() || '#3b82f6';
-  const standardColor = root.getPropertyValue('--viz-standard').trim() || '#64748b';
-  const noeddColor = root.getPropertyValue('--viz-noedd').trim() || '#ef4444';
+  const flashColor = root.getPropertyValue('--viz-flash').trim() || '#ac75a4';
+  const nextdayColor = root.getPropertyValue('--viz-nextday').trim() || '#37abc6';
+  const standardColor = root.getPropertyValue('--viz-standard').trim() || '#767676';
+  const noeddColor = root.getPropertyValue('--viz-noedd').trim() || '#ff0000';
   const surface = root.getPropertyValue('--surface').trim() || '#ffffff';
-  const text3 = root.getPropertyValue('--text-3').trim() || '#6b7280';
-  const border = root.getPropertyValue('--border').trim() || '#e6e8eb';
-  const fontFamily =
-    "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  const text3 = root.getPropertyValue('--text-3').trim() || '#767676';
+  const border = root.getPropertyValue('--border').trim() || '#ebebeb';
+  const fontFamily = root.getPropertyValue('--font-sans').trim() || 'Roboto, sans-serif';
 
   const labels = data.map((d) => {
     const [y, m, day] = d.Fecha.split('-');
@@ -109,7 +108,7 @@ function DeliveryChart({ data }) {
         grid: { display: false },
         border: { color: border },
         ticks: {
-          font: { family: fontFamily, size: 10, weight: '500' },
+          font: { family: fontFamily, size: 10, weight: '600' },
           color: text3,
           maxRotation: 45,
           minRotation: 45,
@@ -122,7 +121,7 @@ function DeliveryChart({ data }) {
         grid: { color: border, drawTicks: false },
         border: { display: false },
         ticks: {
-          font: { family: fontFamily, size: 11 },
+          font: { family: fontFamily, size: 12 },
           color: text3,
           stepSize: 20,
           padding: 8,

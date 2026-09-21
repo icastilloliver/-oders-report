@@ -9,7 +9,7 @@ export default defineConfig({
     proxy: {
       // Reenvía cualquier llamada /api/* al backend Express
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:8080',
         changeOrigin: true,
       },
     },

@@ -8,7 +8,7 @@ ChartJS.register(ArcElement, Tooltip, Legend);
 
 /** Más rebanadas que esto y la dona deja de leerse: la cola va a "Otros" */
 const MAX_SLICES = 9;
-const REST_COLOR = '#cbd5e1';
+const REST_COLOR = '#d8d8d8';
 
 const fmtNum = (n) => n.toLocaleString('es-MX');
 const fmtPct = (n) => `${n.toFixed(1).replace(/\.0$/, '')}%`;
@@ -17,11 +17,11 @@ const fmtPct = (n) => `${n.toFixed(1).replace(/\.0$/, '')}%`;
 const CATEGORY_COLOR = {
   Inventario: '#f97316',
   Capacidad: '#8b5cf6',
-  Cobertura: '#3b82f6',
-  Operación: '#f59e0b',
-  Motor: '#ef4444',
-  'Sin clasificar': '#94a3b8',
-  'Sin error': '#12b76a',
+  Cobertura: '#37abc6',
+  Operación: '#ec9e00',
+  Motor: '#ff0000',
+  'Sin clasificar': '#a1a1a1',
+  'Sin error': '#09ac38',
 };
 
 /**
@@ -93,7 +93,7 @@ function ErrorCodePie({ data, total, csvQuery }) {
           label: c.key,
           sub: `Códigos ${c.codes.join(', ')}`,
           total: c.total,
-          color: CATEGORY_COLOR[c.key] || '#94a3b8',
+          color: CATEGORY_COLOR[c.key] || '#a1a1a1',
           codes: c.codes,
         }));
     }
@@ -149,8 +149,7 @@ function ErrorCodePie({ data, total, csvQuery }) {
 
   const root = getComputedStyle(document.documentElement);
   const surface = root.getPropertyValue('--surface').trim() || '#ffffff';
-  const fontFamily =
-    "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  const fontFamily = root.getPropertyValue('--font-sans').trim() || 'Roboto, sans-serif';
 
   const chartData = {
     labels: slices.map((s) => s.label),

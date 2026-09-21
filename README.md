@@ -6,10 +6,12 @@ Dashboard ejecutivo que consulta BigQuery (compañía LP, Soft Line) y muestra l
 
 ```
 reporte-pedidos-lp/
-├── backend/         Node.js + Express + @google-cloud/bigquery
-│                    Mantiene la Service Account y expone /api/orders-summary
+├── backend/         Go + cloud.google.com/go/bigquery
+│                    Mantiene la Service Account, expone /api/* y sirve el
+│                    build del frontend (internal/transport/static.go) —
+│                    un solo binario, un solo proceso en producción.
 └── frontend/        Vite + React + Chart.js
-                     Consume /api/* y renderiza KPIs + gráfica
+                     Consume /api/* y renderiza KPIs + gráficas
 ```
 
 > ⚠️ **Seguridad**: la Service Account vive ÚNICAMENTE en el backend. Nunca se incluye ni se expone en el frontend (sería visible para cualquier visitante).
@@ -19,20 +21,19 @@ reporte-pedidos-lp/
 ### 1. Service Account de Google
 
 1. Crea una SA en GCP Console → IAM & Admin → Service Accounts.
-2. Asígnale los roles `BigQuery Data Viewer` y `BigQuery Job User` sobre el proyecto `fechaestimadaentregaprod` (o el que corresponda).
-3. Descarga la llave JSON y guárdala como `backend/service-account.json` (ya está en `.gitignore`).
+2. Asígnale los roles `BigQuery Data Viewer` y `BigQuery Job User` sobre el proyecto correspondiente.
+3. Descarga la llave JSON y guárdala como `backend/service-account.json` (ya está en `.gitignore`), o usa Application Default Credentials (`gcloud auth application-default login`) — no hace falta el archivo si ya tienes ADC configurado.
 
 ### 2. Backend
 
 ```bash
 cd backend
 cp .env.example .env
-# Edita .env si necesitas cambiar paths o el projectId
-npm install
-npm run dev
+# Edita .env si necesitas cambiar el projectId o la ubicación del dataset
+go run ./cmd/api
 ```
 
-El backend queda corriendo en `http://localhost:3001`.
+El backend queda corriendo en `http://localhost:8080`.
 
 ### 3. Frontend
 
@@ -42,16 +43,11 @@ npm install
 npm run dev
 ```
 
-El dashboard queda en `http://localhost:5173`. Vite hace proxy de `/api/*` → `http://localhost:3001`.
+El dashboard queda en `http://localhost:5173`. Vite hace proxy de `/api/*` → `http://localhost:8080`.
 
-## Endpoint disponible
+### Todo junto
 
-`GET /api/orders-summary?start=YYYY-MM-DD&end=YYYY-MM-DD`
-
-- `start` (default `2026-04-01`): inicio del rango (inclusive).
-- `end` (default `2026-05-01`): fin del rango (exclusive).
-
-Devuelve `{ data: [{ Fecha, Plan_A, Plan_B, Error, Total }, ...] }`.
+Desde la raíz del repo, `npm run dev:full` levanta ambos (`dev:backend` + `dev:frontend`) en paralelo con `concurrently`. `npm run deploy` construye y despliega la imagen de `Dockerfile` a Cloud Run vía `gcloud run deploy --source .` (un solo contenedor: el binario Go sirve tanto la API como el frontend compilado).
 
 ### Catálogo de errorCode
 

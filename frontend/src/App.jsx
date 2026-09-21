@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Activity,
-  Calendar,
   CalendarDays,
   RefreshCcw,
   AlertCircle,
+  Info,
   Inbox,
   Clock,
   BarChart3,
@@ -23,6 +22,7 @@ import {
   Radar,
   TrendingUp,
 } from 'lucide-react';
+import Sidebar from './components/Sidebar.jsx';
 import KpiCards from './components/KpiCards.jsx';
 import BarChart from './components/BarChart.jsx';
 import DeliveryKpis from './components/DeliveryKpis.jsx';
@@ -35,9 +35,42 @@ import ErrorCodePie from './components/ErrorCodePie.jsx';
 import ErrorFulfillmentSplit from './components/ErrorFulfillmentSplit.jsx';
 import ErrorTrendChart from './components/ErrorTrendChart.jsx';
 import { KpiSkeleton, ChartSkeleton } from './components/Skeleton.jsx';
+import CalendarWidget from './components/CalendarWidget.jsx';
+import liverpoolLogo from './assets/liverpool-logo.svg';
 
 /* ───────────────────────── helpers ───────────────────────── */
-const toISO = (d) => d.toISOString().slice(0, 10);
+/* Fecha local en YYYY-MM-DD. A propósito NO usa toISOString(): ese convierte a
+   UTC y en México (UTC-6) devolvería el día siguiente a partir de las 18:00. */
+const toISO = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+/** Parsea 'YYYY-MM-DD' como medianoche local (new Date(str) lo haría en UTC) */
+const fromISO = (s) => {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+
+/* El backend interpreta las fechas en America/Mexico_City (repository/orders.go),
+   así que "hoy" se fija a esa zona y no a la del navegador. */
+const TZ = 'America/Mexico_City';
+const tzFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+});
+
+/** 'YYYY-MM-DD' del día actual en México */
+const todayISO = () => {
+  const p = Object.fromEntries(
+    tzFmt.formatToParts(new Date()).map(({ type, value }) => [type, value])
+  );
+  return `${p.year}-${p.month}-${p.day}`;
+};
+
+/** El día actual en México como Date a medianoche local, para aritmética */
+const today = () => fromISO(todayISO());
 
 const addDays = (date, days) => {
   const d = new Date(date);
@@ -53,12 +86,32 @@ const startOfMonth = (date) => {
 
 /** Calcula el rango anterior con la misma longitud para comparar tendencias */
 const previousRange = (startISO, endISO) => {
-  const s = new Date(startISO);
-  const e = new Date(endISO);
+  const s = fromISO(startISO);
+  const e = fromISO(endISO);
   const days = Math.max(1, Math.round((e - s) / 86400000) + 1);
   const prevEnd = addDays(s, -1);
   const prevStart = addDays(prevEnd, -(days - 1));
   return { start: toISO(prevStart), end: toISO(prevEnd) };
+};
+
+/** El backend filtra con `ingestionTimestamp < @end`, así que `end` es exclusivo:
+    para incluir el último día visible hay que enviar el día siguiente. */
+const toApiEnd = (endISO) => toISO(addDays(fromISO(endISO), 1));
+
+/** Efecto ripple de Material (igual al de Conecta): círculo animado que
+    nace en el punto exacto del click y se desvanece. El botón que lo usa
+    necesita `position: relative; overflow: hidden;` (ver .ripple en CSS). */
+const addRipple = (e) => {
+  const button = e.currentTarget;
+  const rect = button.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height) * 2;
+  const ripple = document.createElement('span');
+  ripple.className = 'ripple';
+  ripple.style.width = ripple.style.height = `${size}px`;
+  ripple.style.left = `${e.clientX - rect.left - size / 2}px`;
+  ripple.style.top = `${e.clientY - rect.top - size / 2}px`;
+  button.appendChild(ripple);
+  ripple.addEventListener('animationend', () => ripple.remove());
 };
 
 /* ───────────────────────── config ────────────────────────── */
@@ -69,15 +122,51 @@ const QUICK_RANGES = [
   { key: 'mtd', label: 'Este mes', days: null },
 ];
 
-const MULTISITE_DECOMM = ['WS', 'DCK', 'GAP', 'PB', 'PBK', 'BRU'];
+const MULTISITE_DECOMM = ['WS', 'DCK', 'GAP', 'PB', 'PBK', 'BRU', 'BR', 'DPS', 'FAB', 'LVS', 'WLM'];
+
+/** Nombre comercial de cada boutique (código interno usado en `company` sigue siendo {SITE}_DECOMM) */
+const BOUTIQUE_LABELS = {
+  WS: 'Willian Sonoma',
+  DCK: 'Dockers',
+  GAP: 'GAP',
+  PB: 'Pottery Barn',
+  PBK: 'Pottery Barn Kids',
+  BRU: "Babys R'us",
+  BR: 'Banana Republic',
+  DPS: 'Dupuis',
+  FAB: 'Fabletics',
+  LVS: 'Livestore',
+  WLM: 'West Elm',
+};
+
+/** Config del sidebar: sustituye al selector de vista + tabs de compañía */
+const SIDEBAR_ITEMS = [
+  {
+    key: 'planes',
+    label: 'Historial de Remisiones',
+    icon: Layers,
+    submenu: [
+      { key: 'LP_DECOMM', label: 'Liverpool' },
+      { key: 'SBB_DECOMM', label: 'Suburbia' },
+      { key: 'LP_RECALC', label: 'Recalculadas' },
+      {
+        key: 'boutiques',
+        label: 'Boutiques',
+        // No es una sola compañía: agrupa los sitios de MULTISITE_DECOMM,
+        // que ahora se eligen con el filtro "Boutique" dentro del dashboard.
+        matchKeys: MULTISITE_DECOMM.map((site) => `${site}_DECOMM`),
+      },
+    ],
+  },
+  { key: 'entregas', label: 'Tipos de Entrega', icon: Zap },
+  { key: 'buscar', label: 'Buscar Orden', icon: PackageSearch },
+  { key: 'cotejar', label: 'Cotejar Lista', icon: FileSpreadsheet },
+  { key: 'atp', label: 'Validación ATP', icon: Radar },
+];
 
 /** Normaliza el código de compañía para BigQuery (quita sufijos de vista) */
 const toBQCompany = (company) => {
-  let c = company
-    .replace('_DECOMM', '')
-    .replace('_RECALC', '')
-    .replace('_BT_ATG', '')
-    .replace('_BT_DECOMM', '');
+  let c = company.replace('_DECOMM', '').replace('_RECALC', '');
   if (c === 'SBB') c = 'SB';
   return c;
 };
@@ -91,9 +180,9 @@ function App() {
   const [errorTrend, setErrorTrend] = useState(null); // serie diaria de errores · tabs Decomm
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [startDate, setStartDate] = useState('2026-04-01');
-  const [endDate, setEndDate] = useState('2026-05-27');
-  const [company, setCompany] = useState('LP'); // LP, SBB, LP_DECOMM, LP_BT_ATG, LP_BT_DECOMM, etc.
+  const [startDate, setStartDate] = useState(() => toISO(startOfMonth(today())));
+  const [endDate, setEndDate] = useState(() => todayISO());
+  const [company, setCompany] = useState('LP_DECOMM'); // LP_DECOMM, SBB_DECOMM, LP_RECALC, {SITE}_DECOMM
   const [view, setView] = useState('planes'); // 'planes' | 'entregas' | 'buscar' | 'cotejar'
   // Filtro de tipo de surtido: 'all' | 'Fulfillment_Type_Liverpool' | 'Liverpool_CNC_PICK_PACK'
   const [fulfillment, setFulfillment] = useState('all');
@@ -103,24 +192,19 @@ function App() {
   // Mostrar/ocultar la serie % Error en la gráfica (solo tab SBB Decomm)
   const [showErrorSeries, setShowErrorSeries] = useState(true);
   const [activeQuick, setActiveQuick] = useState(null);
+  const [now, setNow] = useState(() => new Date());
+  const [csvExporting, setCsvExporting] = useState(false);
+  const [csvExportError, setCsvExportError] = useState(null);
 
-  /* Parámetros del desglose por errorCode. Los comparten el fetch de la dona
-     y la descarga de cada segmento, así el CSV siempre corresponde a lo que
-     está en pantalla (rango, compañía y tipo de surtido). */
-  const errorCodesQuery = useMemo(() => {
-    const p = new URLSearchParams({
-      start: startDate,
-      end: endDate,
-      company: toBQCompany(company),
-    });
-    if (company.includes('_BT_')) p.set('productType', 'Big Ticket');
-    if (fulfillment !== 'all') p.set('fulfillmentType', fulfillment);
-    if (company === 'LP_DECOMM' && marketplace !== 'all') p.set('marketPlace', marketplace);
-    return p.toString();
-  }, [startDate, endDate, company, fulfillment, marketplace]);
+  /* ── Fetch principal + rango previo (para tendencias) ──
+     Acepta un rango explícito (usado por los chips de rango rápido, que deben
+     disparar la búsqueda de inmediato con las fechas recién calculadas, sin
+     esperar a que el estado se actualice y este callback se re-cree). Si no
+     se pasa nada, usa las fechas actuales en pantalla (botón Actualizar). */
+  const fetchData = useCallback(async (range) => {
+    const effectiveStart = range?.start ?? startDate;
+    const effectiveEnd = range?.end ?? endDate;
 
-  /* ── Fetch principal + rango previo (para tendencias) ── */
-  const fetchData = useCallback(async () => {
     /* Las vistas Buscar Orden, Cotejar y Validación ATP manejan su propio fetch */
     if (view === 'buscar' || view === 'cotejar' || view === 'atp') {
       setLoading(false);
@@ -133,9 +217,7 @@ function App() {
     try {
       /* Vista Tipos de Entrega: un solo fetch a /api/delivery-types */
       if (view === 'entregas') {
-        const isBT = company.includes('_BT_');
-        let params = `?start=${startDate}&end=${endDate}&company=${toBQCompany(company)}`;
-        if (isBT) params += '&productType=Big Ticket';
+        const params = `?start=${effectiveStart}&end=${toApiEnd(effectiveEnd)}&company=${toBQCompany(company)}`;
 
         const res = await fetch(`/api/delivery-types${params}`);
         if (!res.ok) {
@@ -147,28 +229,18 @@ function App() {
         return;
       }
 
-      const prev = previousRange(startDate, endDate);
-      const isDecomm = company.includes('DECOMM') || company === 'LP_BT_DECOMM';
+      const prev = previousRange(effectiveStart, effectiveEnd);
       const isRecalc = company.includes('RECALC');
-      const isBT = company.includes('_BT_');
-      
-      let endpoint = '/api/orders-summary';
-      if (isDecomm) endpoint = '/api/orders-decomm';
-      if (isRecalc) endpoint = '/api/orders-recalculate';
+      const endpoint = isRecalc ? '/api/orders-recalculate' : '/api/orders-decomm';
 
       // Mapeo de compañías para BigQuery
-      let finalCompany = company.replace('_DECOMM', '').replace('_RECALC', '').replace('_BT_ATG', '').replace('_BT_DECOMM', '');
-      if ((isDecomm || isRecalc) && finalCompany === 'SBB') {
+      let finalCompany = company.replace('_DECOMM', '').replace('_RECALC', '');
+      if (finalCompany === 'SBB') {
         finalCompany = 'SB';
       }
 
-      let queryParams = `?start=${startDate}&end=${endDate}&company=${finalCompany}`;
-      let prevParams = `?start=${prev.start}&end=${prev.end}&company=${finalCompany}`;
-
-      if (isBT) {
-        queryParams += '&productType=Big Ticket';
-        prevParams += '&productType=Big Ticket';
-      }
+      let queryParams = `?start=${effectiveStart}&end=${toApiEnd(effectiveEnd)}&company=${finalCompany}`;
+      let prevParams = `?start=${prev.start}&end=${toApiEnd(prev.end)}&company=${finalCompany}`;
 
       // El recalculo no tiene fulfillmentType en su payload
       if (fulfillment !== 'all' && !isRecalc) {
@@ -207,6 +279,15 @@ function App() {
          Actualizar, la descarga por segmento sigue trayendo lo que está pintado. */
       if (company === 'SBB_DECOMM' || company === 'LP_DECOMM') {
         try {
+          const p = new URLSearchParams({
+            start: effectiveStart,
+            end: toApiEnd(effectiveEnd),
+            company: toBQCompany(company),
+          });
+          if (fulfillment !== 'all') p.set('fulfillmentType', fulfillment);
+          if (company === 'LP_DECOMM' && marketplace !== 'all') p.set('marketPlace', marketplace);
+          const errorCodesQuery = p.toString();
+
           const [resCodes, resTrend] = await Promise.all([
             fetch(`/api/error-codes?${errorCodesQuery}`),
             fetch(`/api/error-trend?${errorCodesQuery}`),
@@ -228,7 +309,11 @@ function App() {
          No lleva el filtro de surtido (compara ambos), pero sí el de producto. */
       if (company === 'LP_DECOMM') {
         try {
-          const p = new URLSearchParams({ start: startDate, end: endDate, company: 'LP' });
+          const p = new URLSearchParams({
+            start: effectiveStart,
+            end: toApiEnd(effectiveEnd),
+            company: 'LP',
+          });
           if (marketplace !== 'all') p.set('marketPlace', marketplace);
           const resSplit = await fetch(`/api/error-codes-fulfillment?${p}`);
           setFsplit(resSplit.ok ? { ...(await resSplit.json()), query: p.toString() } : null);
@@ -243,86 +328,118 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, company, view, fulfillment, marketplace, errorCodesQuery]);
+  }, [startDate, endDate, company, view, fulfillment, marketplace]);
 
-  const handleDownloadCSV = () => {
-    const isDecomm = company.includes('DECOMM') || company === 'LP_BT_DECOMM';
+  // Usa fetch (y no window.open) para no abrir una pestaña en blanco: así se
+  // puede mostrar el spinner en el botón y quedarse en la misma página.
+  const handleDownloadCSV = async () => {
+    if (csvExporting) return;
+
     const isRecalc = company.includes('RECALC');
-    const isBT = company.includes('_BT_');
-    
-    let type = 'summary';
-    if (isDecomm) type = 'decomm';
-    if (isRecalc) type = 'recalc';
+    const type = isRecalc ? 'recalc' : 'decomm';
 
-    let finalCompany = company.replace('_DECOMM', '').replace('_RECALC', '').replace('_BT_ATG', '').replace('_BT_DECOMM', '');
-    if ((isDecomm || isRecalc) && finalCompany === 'SBB') {
+    let finalCompany = company.replace('_DECOMM', '').replace('_RECALC', '');
+    if (finalCompany === 'SBB') {
       finalCompany = 'SB';
     }
 
-    let url = `/api/orders-csv?start=${startDate}&end=${endDate}&company=${finalCompany}&type=${type}`;
-    if (isBT) {
-      url += '&productType=Big Ticket';
-    }
+    let url = `/api/orders-csv?start=${startDate}&end=${toApiEnd(endDate)}&company=${finalCompany}&type=${type}`;
     if (fulfillment !== 'all' && !isRecalc) {
       url += `&fulfillmentType=${fulfillment}`;
     }
     if (marketplace !== 'all' && company === 'LP_DECOMM') {
       url += `&marketPlace=${marketplace}`;
     }
-    window.open(url, '_blank');
+
+    setCsvExporting(true);
+    setCsvExportError(null);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        const message = contentType.includes('application/json')
+          ? (await res.json())?.error
+          : await res.text();
+        throw new Error(message || `HTTP ${res.status}`);
+      }
+
+      const disposition = res.headers.get('content-disposition') || '';
+      const match = /filename="?([^";]+)"?/.exec(disposition);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = match ? match[1] : 'reporte.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      setCsvExportError(err.message);
+    } finally {
+      setCsvExporting(false);
+    }
   };
 
   useEffect(() => {
     fetchData();
-    // Color de marca dinámico + data-attribute para el tema
-    const isLP = company.startsWith('LP');
-    const brandColor = isLP ? '#e10098' : '#552166';
-    const brandRgb = isLP ? '225, 0, 152' : '85, 33, 102';
-    document.documentElement.style.setProperty('--brand-primary', brandColor);
-    document.documentElement.style.setProperty('--brand-primary-rgb', brandRgb);
-    // Serie Flash en gráficas: el morado de marca es muy oscuro para marcas
-    // de datos, se usa un paso más claro del mismo tono (paleta validada).
-    document.documentElement.style.setProperty(
-      '--viz-flash',
-      isLP ? '#e10098' : '#8347ad'
-    );
+    // LP y Suburbia comparten el mismo color de marca (paleta "El Puerto de
+    // Liverpool" del sistema de diseño), así que ya no hace falta alternar
+    // --brand-primary por JS: queda fijo en :root (styles.css).
     document.documentElement.setAttribute('data-company', company);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company, view, fulfillment, marketplace]);
 
-  /* ── Aplicar quick range ── */
-  const applyQuickRange = (range) => {
-    const today = new Date('2026-05-27'); // En prod: new Date()
-    let start, end;
-    if (range.key === 'mtd') {
-      start = startOfMonth(today);
-      end = today;
-    } else if (range.days === 0) {
-      start = today;
-      end = today;
+  /* Reloj del header: un único intervalo durante toda la vida del componente */
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  /** Rango por defecto: primer día del mes en curso → hoy (el mismo con el que arranca la página) */
+  const defaultRange = () => ({ start: toISO(startOfMonth(today())), end: todayISO() });
+
+  /* ── Aplicar / quitar un rango rápido ──
+     Ambas acciones disparan la búsqueda de inmediato, con las fechas recién
+     calculadas (no las del estado, que todavía no se actualizó). Volver a
+     hacer click en el chip ya activo lo desmarca y regresa al rango por
+     defecto, también consultando de inmediato. */
+  const handleQuickRange = (range) => {
+    let start, end, nextActive;
+
+    if (activeQuick === range.key) {
+      ({ start, end } = defaultRange());
+      nextActive = null;
     } else {
-      end = today;
-      start = addDays(today, -range.days);
+      const today_ = today();
+      let startDateObj, endDateObj;
+      if (range.key === 'mtd') {
+        startDateObj = startOfMonth(today_);
+        endDateObj = today_;
+      } else if (range.days === 0) {
+        startDateObj = today_;
+        endDateObj = today_;
+      } else {
+        endDateObj = today_;
+        startDateObj = addDays(today_, -range.days);
+      }
+      start = toISO(startDateObj);
+      end = toISO(endDateObj);
+      nextActive = range.key;
     }
-    setStartDate(toISO(start));
-    setEndDate(toISO(end));
-    setActiveQuick(range.key);
+
+    setStartDate(start);
+    setEndDate(end);
+    setActiveQuick(nextActive);
+    fetchData({ start, end });
   };
 
-  const handleDateChange = (setter) => (e) => {
-    setter(e.target.value);
+  const handleDateChange = (setter) => (isoValue) => {
+    setter(isoValue);
     setActiveQuick(null);
   };
 
-  /* ── Cambiar de vista normalizando pestañas que no aplican ── */
   const switchView = (v) => {
-    if (v === 'entregas') {
-      // La vista de entregas siempre lee FAC_EDD_ORDERS_TRN (Decomm):
-      // ATG y Recalculo no aplican, y los tabs Decomm duplican LP/SBB.
-      if (company === 'LP_BT_ATG') setCompany('LP_BT_DECOMM');
-      else if (company === 'LP_RECALC' || company === 'LP_DECOMM') setCompany('LP');
-      else if (company === 'SBB_DECOMM') setCompany('SBB');
-    }
     setView(v);
   };
 
@@ -331,212 +448,70 @@ function App() {
 
   const rangeLabel = useMemo(() => {
     const opts = { day: '2-digit', month: 'short', year: 'numeric' };
-    const s = new Date(startDate).toLocaleDateString('es-MX', opts);
-    const e = new Date(endDate).toLocaleDateString('es-MX', opts);
+    const s = fromISO(startDate).toLocaleDateString('es-MX', opts);
+    const e = fromISO(endDate).toLocaleDateString('es-MX', opts);
     return `${s} → ${e}`;
   }, [startDate, endDate]);
 
-  const siteTitle = useMemo(() => {
-    if (company === 'LP_BT_ATG') return 'Liverpool (BT ATG)';
-    if (company === 'LP_BT_DECOMM') return 'Liverpool (BT Decomm)';
-    if (company.startsWith('LP')) return 'Liverpool';
-    if (company.startsWith('SBB')) return 'Suburbia';
-    return company.replace('_DECOMM', '').replace('_RECALC', '');
-  }, [company]);
+  /* Formateadores del reloj: se construyen una sola vez, se reutilizan cada tick */
+  const clockDateFmt = useMemo(
+    () => new Intl.DateTimeFormat('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }),
+    []
+  );
+  const clockTimeFmt = useMemo(
+    () => new Intl.DateTimeFormat('es-MX', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }),
+    []
+  );
 
   const reportSource = useMemo(() => {
     if (view === 'atp') return 'FAC_EDD_ORDERS_TRN → OMS EPLInventoryAvailabilityWebService';
-    if (view === 'buscar' || view === 'cotejar') return 'FAC_EDD_ORDERS_TRN';
-    if (view === 'entregas') {
-      return company.includes('_BT_')
-        ? 'FAC_EDD_ORDERS_TRN (Big Ticket)'
-        : 'FAC_EDD_ORDERS_TRN';
-    }
-    if (company === 'LP_BT_ATG') return 'tables_raw_changelog (Big Ticket)';
-    if (company === 'LP_BT_DECOMM') return 'FAC_EDD_ORDERS_TRN (Big Ticket)';
-    if (company.includes('RECALC')) return 'FAC_EDD_RECALCULATE_TRN';
-    if (company.includes('DECOMM')) return 'FAC_EDD_ORDERS_TRN';
-    return 'tables_raw_changelog';
+    if (view === 'buscar' || view === 'cotejar' || view === 'entregas') return 'FAC_EDD_ORDERS_TRN';
+    return company.includes('RECALC') ? 'FAC_EDD_RECALCULATE_TRN' : 'FAC_EDD_ORDERS_TRN';
   }, [company, view]);
 
-  return (
-    <div className="container">
-      {/* ─── Header ─── */}
-      <header className="app-header">
-        <div className="app-header__title">
-          <div className="app-header__logo">
-            <Activity size={22} strokeWidth={2.2} />
-          </div>
-          <div>
-            <h1>
-              {view === 'atp' ? (
-                'Reporte Ejecutivo · Validación ATP Decomm'
-              ) : (
-                <>
-                  Reporte Ejecutivo · Pedidos {siteTitle}
-                  {view === 'planes' && company.includes('DECOMM') && !company.includes('_BT_') ? ' (Decomm)' : ''}
-                  {view === 'planes' && company.includes('RECALC') ? ' (Recalculo)' : ''}
-                </>
-              )}
-            </h1>
-            <p className="subtitle">
-              {view === 'atp'
-                ? `Errores del query de decomm validados contra el OMS de Suburbia (disponibilidad ATP, timeout 20 s) · ${reportSource}`
-                : view === 'cotejar'
-                ? `Sube tu lista de órdenes y cotéjala: errorCode, porcentajes y no encontradas · ${reportSource}`
-                : view === 'buscar'
-                ? `Consulta una orden o remisión: SKUs, tiendas, fechas estimadas y tipo de entrega · ${reportSource}`
-                : view === 'entregas'
-                ? `Tipos de entrega (Flash, Siguiente Día, Estándar) y asignaciones por tienda · ${reportSource}`
-                : `Distribución diaria de pedidos por plan: A, B y Error · ${reportSource}`}
-            </p>
-          </div>
-        </div>
+  /* Descripción de la vista activa · se muestra en el footer (el header, igual
+     al de Conecta, ya no lleva subtítulo) */
+  const viewDescription = useMemo(() => {
+    if (view === 'atp') return 'Errores del query de decomm validados contra el OMS de Suburbia (disponibilidad ATP)';
+    if (view === 'cotejar') return 'Sube tu lista de órdenes y cotéjala: errorCode, porcentajes y no encontradas';
+    if (view === 'buscar') return 'Consulta una orden o remisión: SKUs, tiendas, fechas estimadas y tipo de entrega';
+    if (view === 'entregas') return 'Tipos de entrega (Flash, Siguiente Día, Estándar) y asignaciones por tienda';
+    return 'Distribución diaria de pedidos por plan: A, B y Error';
+  }, [view]);
 
-        <div className="app-header__meta">
-          <span className="dot" aria-hidden="true" />
-          <Clock size={12} />
-          <span>{view === 'atp' ? 'Rango en la vista' : isGlobalView ? 'Últimos 6 meses' : rangeLabel}</span>
+  return (
+    <>
+      {/* ─── Header (idéntico al de Conecta, ancho completo) ─── */}
+      <header className="app-header">
+        <div className="app-header__inner">
+          <div className="app-header__brand">
+            <img src={liverpoolLogo} alt="Liverpool" className="app-header__logo" />
+            <span className="app-header__divider" aria-hidden="true" />
+            <h1>Fecha Estimada de Entrega</h1>
+          </div>
+
+          <div className="app-header__meta">
+            <span className="dot" aria-hidden="true" />
+            <Clock size={12} />
+            <time dateTime={now.toISOString()}>
+              {clockDateFmt.format(now)} · {clockTimeFmt.format(now)}
+            </time>
+          </div>
         </div>
       </header>
 
-      {/* ─── Selector de vista ─── */}
-      <div className="view-switch" role="tablist" aria-label="Vista">
-        <button
-          role="tab"
-          aria-selected={view === 'planes'}
-          className={`view-switch__btn ${view === 'planes' ? 'active' : ''}`}
-          onClick={() => switchView('planes')}
-        >
-          <Layers size={14} strokeWidth={2.2} />
-          Planes A / B
-        </button>
-        <button
-          role="tab"
-          aria-selected={view === 'entregas'}
-          className={`view-switch__btn ${view === 'entregas' ? 'active' : ''}`}
-          onClick={() => switchView('entregas')}
-        >
-          <Zap size={14} strokeWidth={2.2} />
-          Tipos de Entrega
-        </button>
-        <button
-          role="tab"
-          aria-selected={view === 'buscar'}
-          className={`view-switch__btn ${view === 'buscar' ? 'active' : ''}`}
-          onClick={() => switchView('buscar')}
-        >
-          <PackageSearch size={14} strokeWidth={2.2} />
-          Buscar Orden
-        </button>
-        <button
-          role="tab"
-          aria-selected={view === 'cotejar'}
-          className={`view-switch__btn ${view === 'cotejar' ? 'active' : ''}`}
-          onClick={() => switchView('cotejar')}
-        >
-          <FileSpreadsheet size={14} strokeWidth={2.2} />
-          Cotejar Lista
-        </button>
-        <button
-          role="tab"
-          aria-selected={view === 'atp'}
-          className={`view-switch__btn ${view === 'atp' ? 'active' : ''}`}
-          onClick={() => switchView('atp')}
-        >
-          <Radar size={14} strokeWidth={2.2} />
-          Validación ATP
-        </button>
-      </div>
+      <div className="app-shell">
+      <Sidebar
+        items={SIDEBAR_ITEMS}
+        view={view}
+        onSelectView={switchView}
+        company={company}
+        onSelectCompany={setCompany}
+      />
 
-      {/* ─── Tabs compañía (no aplican a las vistas globales) ─── */}
-      {!isGlobalView && (
-      <div className="tabs" role="tablist" aria-label="Compañía">
-        {/* Principales */}
-        <button
-          role="tab"
-          aria-selected={company === 'LP'}
-          className={`tab-btn ${company === 'LP' ? 'active' : ''}`}
-          onClick={() => setCompany('LP')}
-        >
-          Liverpool · LP
-        </button>
-        <button
-          role="tab"
-          aria-selected={company === 'SBB'}
-          className={`tab-btn ${company === 'SBB' ? 'active' : ''}`}
-          onClick={() => setCompany('SBB')}
-        >
-          Suburbia · SBB
-        </button>
-
-        {/* Bigticket */}
-        {view === 'planes' && (
-          <button
-            role="tab"
-            aria-selected={company === 'LP_BT_ATG'}
-            className={`tab-btn ${company === 'LP_BT_ATG' ? 'active' : ''}`}
-            onClick={() => setCompany('LP_BT_ATG')}
-          >
-            BT ATG
-          </button>
-        )}
-        <button
-          role="tab"
-          aria-selected={company === 'LP_BT_DECOMM'}
-          className={`tab-btn ${company === 'LP_BT_DECOMM' ? 'active' : ''}`}
-          onClick={() => setCompany('LP_BT_DECOMM')}
-        >
-          BT Decomm
-        </button>
-
-        {/* Decomm Principales (en Tipos de Entrega LP/SBB ya son Decomm) */}
-        {view === 'planes' && (
-          <>
-            <button
-              role="tab"
-              aria-selected={company === 'LP_DECOMM'}
-              className={`tab-btn ${company === 'LP_DECOMM' ? 'active' : ''}`}
-              onClick={() => setCompany('LP_DECOMM')}
-            >
-              LP Decomm
-            </button>
-            <button
-              role="tab"
-              aria-selected={company === 'SBB_DECOMM'}
-              className={`tab-btn ${company === 'SBB_DECOMM' ? 'active' : ''}`}
-              onClick={() => setCompany('SBB_DECOMM')}
-            >
-              SBB Decomm
-            </button>
-
-            {/* Recalculo */}
-            <button
-              role="tab"
-              aria-selected={company === 'LP_RECALC'}
-              className={`tab-btn ${company === 'LP_RECALC' ? 'active' : ''}`}
-              onClick={() => setCompany('LP_RECALC')}
-            >
-              Recalculo Decomm
-            </button>
-          </>
-        )}
-
-        {/* Multisite Decomm */}
-        {MULTISITE_DECOMM.map((site) => (
-          <button
-            key={site}
-            role="tab"
-            aria-selected={company === `${site}_DECOMM`}
-            className={`tab-btn ${company === `${site}_DECOMM` ? 'active' : ''}`}
-            onClick={() => setCompany(`${site}_DECOMM`)}
-          >
-            {site} Decomm
-          </button>
-        ))}
-      </div>
-      )}
-
+      <div className="container">
       {/* ─── Filtros (las vistas globales no usan rango de fechas) ─── */}
       {!isGlobalView && (
       <div className="filters-card">
@@ -548,7 +523,7 @@ function App() {
             <button
               key={r.key}
               className={`chip ${activeQuick === r.key ? 'active' : ''}`}
-              onClick={() => applyQuickRange(r)}
+              onClick={() => handleQuickRange(r)}
               type="button"
             >
               {r.label}
@@ -632,37 +607,52 @@ function App() {
           </div>
         )}
 
+        {/* Filtro de boutique · exclusivo del dashboard "Boutiques"
+            (agrupa lo que antes eran los tabs WS/DCK/GAP/PB/PBK/BRU Decomm) */}
+        {view === 'planes' && MULTISITE_DECOMM.some((site) => company === `${site}_DECOMM`) && (
+          <div className="quick-ranges" role="group" aria-label="Boutique">
+            <span className="quick-ranges__label">
+              <Store size={12} /> Boutique
+            </span>
+            {MULTISITE_DECOMM.map((site) => (
+              <button
+                key={site}
+                type="button"
+                className={`chip ${company === `${site}_DECOMM` ? 'active' : ''}`}
+                onClick={() => setCompany(`${site}_DECOMM`)}
+              >
+                {BOUTIQUE_LABELS[site]}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="filters">
           <div className="field">
             <label htmlFor="start-date">Desde</label>
-            <div className="input-wrap">
-              <Calendar className="input-wrap__icon" size={16} />
-              <input
-                id="start-date"
-                type="date"
-                value={startDate}
-                onChange={handleDateChange(setStartDate)}
-              />
-            </div>
+            <CalendarWidget
+              id="start-date"
+              value={startDate}
+              onChange={handleDateChange(setStartDate)}
+              label="Fecha desde"
+            />
           </div>
 
           <div className="field">
             <label htmlFor="end-date">Hasta</label>
-            <div className="input-wrap">
-              <Calendar className="input-wrap__icon" size={16} />
-              <input
-                id="end-date"
-                type="date"
-                value={endDate}
-                onChange={handleDateChange(setEndDate)}
-              />
-            </div>
+            <CalendarWidget
+              id="end-date"
+              value={endDate}
+              onChange={handleDateChange(setEndDate)}
+              label="Fecha hasta"
+            />
           </div>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
             <button
               className="btn-primary"
-              onClick={fetchData}
+              onClick={() => fetchData()}
+              onMouseDown={addRipple}
               disabled={loading}
             >
               {loading ? (
@@ -681,29 +671,37 @@ function App() {
             <button
               className="btn-secondary"
               onClick={handleDownloadCSV}
-              disabled={loading || data.length === 0}
+              onMouseDown={addRipple}
+              disabled={loading || csvExporting || data.length === 0}
               title="Descargar pedidos con Error o Plan B en CSV"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '0 16px',
-                height: '38px',
-                borderRadius: '8px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'var(--surface-color)',
-                color: 'var(--text-color)',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: '500',
-              }}
             >
-              <Download size={15} strokeWidth={2.4} />
-              Exportar
+              {csvExporting ? (
+                <>
+                  <span className="spinner" aria-hidden="true" />
+                  Exportando…
+                </>
+              ) : (
+                <>
+                  <Download size={15} strokeWidth={2.4} />
+                  Exportar
+                </>
+              )}
             </button>
             )}
           </div>
         </div>
+        {view === 'planes' && (
+          <p className="csv-export-hint">
+            <Info size={13} strokeWidth={2.2} />
+            <span>El CSV exportado solo incluye pedidos con Error o Plan B.</span>
+          </p>
+        )}
+        {csvExportError && (
+          <p className="csv-export-error" role="alert">
+            <AlertCircle size={14} strokeWidth={2.2} />
+            <span>No se pudo exportar el CSV: {csvExportError}</span>
+          </p>
+        )}
       </div>
       )}
 
@@ -912,9 +910,11 @@ function App() {
       )}
 
       <footer>
-        Fuente: <code>{reportSource}</code> · Hora local: América/México
+        {viewDescription} · Fuente: <code>{reportSource}</code> · Hora local: América/México
       </footer>
-    </div>
+      </div>
+      </div>
+    </>
   );
 }
 
