@@ -153,7 +153,7 @@ type errorTrendCodeBQ struct {
 // que la gráfica de tendencia cuadre con la dona.
 func (o *Orders) GetErrorTrend(
 	ctx context.Context,
-	company, productType, fulfillmentType, marketPlace, startDate, endDate string,
+	company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string,
 ) (days []*model.ErrorTrendDay, codes []*model.ErrorTrendCode, err error) {
 	params := []bigquery.QueryParameter{
 		{Name: "company", Value: company},
@@ -176,6 +176,11 @@ func (o *Orders) GetErrorTrend(
 		filterMarketplace = "AND marketPlace = @marketPlace"
 		params = append(params, bigquery.QueryParameter{Name: "marketPlace", Value: marketPlace == "true"})
 	}
+	var filterChannel string
+	if channel != "" {
+		filterChannel = "AND UPPER(TRIM(channel)) = @channel"
+		params = append(params, bigquery.QueryParameter{Name: "channel", Value: channel})
+	}
 
 	baseCTE := fmt.Sprintf(`
 		WITH base AS (
@@ -188,10 +193,11 @@ func (o *Orders) GetErrorTrend(
 				%s
 				%s
 				%s
+				%s
 				AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
 				AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
 		)
-	`, errorCodeNormSQL, clasificacionSQL, filterProductType, filterFulfillment, filterMarketplace)
+	`, errorCodeNormSQL, clasificacionSQL, filterProductType, filterFulfillment, filterMarketplace, filterChannel)
 
 	queryDays := baseCTE + `
 		SELECT
@@ -283,7 +289,7 @@ type fulfillmentCodeBQ struct {
 // errorCode dentro de cada segmento.
 func (o *Orders) GetErrorCodesFulfillment(
 	ctx context.Context,
-	company, marketPlace, startDate, endDate string,
+	company, marketPlace, channel, startDate, endDate string,
 ) (map[string]*model.FulfillmentSegment, error) {
 	params := []bigquery.QueryParameter{
 		{Name: "company", Value: company},
@@ -296,6 +302,11 @@ func (o *Orders) GetErrorCodesFulfillment(
 		filterMarketplace = "AND marketPlace = @marketPlace"
 		params = append(params, bigquery.QueryParameter{Name: "marketPlace", Value: marketPlace == "true"})
 	}
+	var filterChannel string
+	if channel != "" {
+		filterChannel = "AND UPPER(TRIM(channel)) = @channel"
+		params = append(params, bigquery.QueryParameter{Name: "channel", Value: channel})
+	}
 
 	baseCTE := fmt.Sprintf(`
 		WITH base AS (
@@ -307,10 +318,11 @@ func (o *Orders) GetErrorCodesFulfillment(
 			FROM `+"`crp-pro-dig-edd.mus_pro_digital_prd_tbls.FAC_EDD_ORDERS_TRN`"+`
 			WHERE company = @company
 				%s
+				%s
 				AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
 				AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
 		)
-	`, fulfillmentBucketSQL, errorCodeNormSQL, clasificacionSQL, filterMarketplace)
+	`, fulfillmentBucketSQL, errorCodeNormSQL, clasificacionSQL, filterMarketplace, filterChannel)
 
 	segments := map[string]*model.FulfillmentSegment{
 		"domicilio": {Codes: []*model.ErrorCodeCount{}},

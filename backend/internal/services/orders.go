@@ -106,7 +106,7 @@ func NewOrdersService(o repository.OrdersRepository) *OrdersService {
 }
 
 func (o *OrdersService) GetOrdersSummary(
-	productType, fulfillmentType, isMarketplace string,
+	productType, fulfillmentType, isMarketplace, channel string,
 	company, startDate, endDate string,
 ) ([]*model.OrdersSummary, error) {
 
@@ -114,11 +114,17 @@ func (o *OrdersService) GetOrdersSummary(
 		return nil, fmt.Errorf("company, startDate, and endDate parameters are required")
 	}
 
+	channel, err := normalizeChannel(channel)
+	if err != nil {
+		return nil, err
+	}
+
 	return o.order.GetOrdersSummary(
 		context.Background(),
 		productType,
 		fulfillmentType,
 		isMarketplace,
+		channel,
 		company,
 		startDate,
 		endDate,
@@ -170,8 +176,13 @@ func (o *OrdersService) GetDeliveryTypes(
 // GetErrorCodes valida los filtros y regresa el desglose por errorCode de
 // los registros clasificados como Error en el rango.
 func (o *OrdersService) GetErrorCodes(
-	company, productType, fulfillmentType, marketPlace, startDate, endDate string,
+	company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string,
 ) (*model.ErrorCodesResult, error) {
+	channel, err := normalizeChannel(channel)
+	if err != nil {
+		return nil, err
+	}
+
 	var dateOnlyRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 	if startDate == "" {
@@ -202,6 +213,7 @@ func (o *OrdersService) GetErrorCodes(
 		productType,
 		fulfillmentType,
 		marketPlace,
+		channel,
 		startDate,
 		endDate,
 	)
@@ -225,8 +237,12 @@ func (o *OrdersService) SearchOrder(orderNumber string) ([]*model.OrderSearchLin
 // lectura si el cliente corta la descarga a medias.
 func (o *OrdersService) ExportOrdersCSV(
 	ctx context.Context,
-	start, end, company, csvType, productType, fulfillmentType, marketPlace string,
+	start, end, company, csvType, productType, fulfillmentType, marketPlace, channel string,
 ) (stream *repository.OrdersCSVStream, filename string, err error) {
+	channel, err = normalizeChannel(channel)
+	if err != nil {
+		return nil, "", err
+	}
 	if start == "" || end == "" || company == "" || csvType == "" {
 		return nil, "", ErrMissingCSVParams
 	}
@@ -255,6 +271,7 @@ func (o *OrdersService) ExportOrdersCSV(
 		ProductType:     productType,
 		FulfillmentType: fulfillmentType,
 		MarketPlace:     marketPlace,
+		Channel:         channel,
 	})
 	if err != nil {
 		return nil, "", err
@@ -429,8 +446,12 @@ func (o *OrdersService) BulkCheckOrders(ctx context.Context, raw []string) (*mod
 // sugerido y si el resultado se truncó por el tope de filas.
 func (o *OrdersService) GetErrorCodesCSV(
 	ctx context.Context,
-	start, end, company, productType, fulfillmentType, marketPlace, rawCodes, label string,
+	start, end, company, productType, fulfillmentType, marketPlace, channel, rawCodes, label string,
 ) (header []string, rows [][]string, truncated bool, filename string, err error) {
+	channel, err = normalizeChannel(channel)
+	if err != nil {
+		return nil, nil, false, "", err
+	}
 	var dateOnlyRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 	if start == "" {
@@ -477,6 +498,7 @@ func (o *OrdersService) GetErrorCodesCSV(
 		ProductType:     productType,
 		FulfillmentType: fulfillmentType,
 		MarketPlace:     marketPlace,
+		Channel:         channel,
 		Codes:           codes,
 	})
 	if err != nil {

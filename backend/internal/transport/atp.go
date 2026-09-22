@@ -129,10 +129,11 @@ func (h *OrdersHandler) handleErrorTrend(w http.ResponseWriter, r *http.Request)
 	productType := r.URL.Query().Get("productType")
 	fulfillmentType := r.URL.Query().Get("fulfillmentType")
 	marketPlace := r.URL.Query().Get("marketPlace")
+	channel := r.URL.Query().Get("channel")
 	startDate := r.URL.Query().Get("start")
 	endDate := r.URL.Query().Get("end")
 
-	days, codes, err := h.service.GetErrorTrend(r.Context(), company, productType, fulfillmentType, marketPlace, startDate, endDate)
+	days, codes, err := h.service.GetErrorTrend(r.Context(), company, productType, fulfillmentType, marketPlace, channel, startDate, endDate)
 	if err != nil {
 		utils.Logging("ERROR", "Error getting error trend", "", map[string]any{
 			"query": r.URL.Query(),
@@ -141,7 +142,8 @@ func (h *OrdersHandler) handleErrorTrend(w http.ResponseWriter, r *http.Request)
 		switch {
 		case errors.Is(err, services.ErrInvalidDateFormat),
 			errors.Is(err, services.ErrInvalidFulfillmentType),
-			errors.Is(err, services.ErrInvalidMarketPlace):
+			errors.Is(err, services.ErrInvalidMarketPlace),
+			errors.Is(err, services.ErrInvalidChannel):
 			writeJSONError(w, http.StatusBadRequest, err)
 		default:
 			writeJSONError(w, http.StatusInternalServerError, err)
@@ -163,10 +165,11 @@ func (h *OrdersHandler) handleErrorTrend(w http.ResponseWriter, r *http.Request)
 func (h *OrdersHandler) handleErrorCodesFulfillment(w http.ResponseWriter, r *http.Request) {
 	company := r.URL.Query().Get("company")
 	marketPlace := r.URL.Query().Get("marketPlace")
+	channel := r.URL.Query().Get("channel")
 	startDate := r.URL.Query().Get("start")
 	endDate := r.URL.Query().Get("end")
 
-	segments, err := h.service.GetErrorCodesFulfillment(r.Context(), company, marketPlace, startDate, endDate)
+	segments, err := h.service.GetErrorCodesFulfillment(r.Context(), company, marketPlace, channel, startDate, endDate)
 	if err != nil {
 		utils.Logging("ERROR", "Error getting error codes fulfillment", "", map[string]any{
 			"query": r.URL.Query(),
@@ -174,7 +177,8 @@ func (h *OrdersHandler) handleErrorCodesFulfillment(w http.ResponseWriter, r *ht
 		})
 		switch {
 		case errors.Is(err, services.ErrInvalidDateFormat),
-			errors.Is(err, services.ErrInvalidMarketPlace):
+			errors.Is(err, services.ErrInvalidMarketPlace),
+			errors.Is(err, services.ErrInvalidChannel):
 			writeJSONError(w, http.StatusBadRequest, err)
 		default:
 			writeJSONError(w, http.StatusInternalServerError, err)
@@ -192,6 +196,47 @@ func (h *OrdersHandler) handleErrorCodesFulfillment(w http.ResponseWriter, r *ht
 		"range":       map[string]string{"start": startDate, "end": endDate},
 		"company":     company,
 		"marketPlace": mp,
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (h *OrdersHandler) HandlerChannelBreakdown(w http.ResponseWriter, r *http.Request) {
+	company := r.URL.Query().Get("company")
+	productType := r.URL.Query().Get("productType")
+	fulfillmentType := r.URL.Query().Get("fulfillmentType")
+	marketPlace := r.URL.Query().Get("marketPlace")
+	startDate := r.URL.Query().Get("start")
+	endDate := r.URL.Query().Get("end")
+
+	data, err := h.service.GetChannelBreakdown(r.Context(), company, productType, fulfillmentType, marketPlace, startDate, endDate)
+	if err != nil {
+		utils.Logging("ERROR", "Error getting channel breakdown", "", map[string]any{
+			"query": r.URL.Query(),
+			"error": err.Error(),
+		})
+		switch {
+		case errors.Is(err, services.ErrInvalidDateFormat),
+			errors.Is(err, services.ErrInvalidFulfillmentType),
+			errors.Is(err, services.ErrInvalidMarketPlace):
+			writeJSONError(w, http.StatusBadRequest, err)
+		default:
+			writeJSONError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+
+	var total int64
+	for _, c := range data {
+		total += c.Total
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":    data,
+		"total":   total,
+		"range":   map[string]string{"start": startDate, "end": endDate},
+		"company": company,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

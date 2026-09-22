@@ -92,3 +92,11 @@ type FulfillmentSegment struct {
 	Errores int64             `json:"errores"`
 	Codes   []*ErrorCodeCount `json:"codes"`
 }
+
+// ChannelCount es el peso de un canal (APP/WEB/WAP/CSC…) dentro del rango y
+// filtros activos, con sus errores para poder mostrar la tasa por canal.
+type ChannelCount struct {
+	Channel string `json:"channel"`
+	Total   int64  `json:"total"`
+	Errores int64  `json:"errores"`
+}

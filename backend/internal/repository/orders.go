@@ -16,17 +16,18 @@ import (
 )
 
 type OrdersRepository interface {
-	GetOrdersSummary(ctx context.Context, productType, fulfillmentType, isMarketplace string, company, startDate, endDate string) ([]*model.OrdersSummary, error)
+	GetOrdersSummary(ctx context.Context, productType, fulfillmentType, isMarketplace, channel string, company, startDate, endDate string) ([]*model.OrdersSummary, error)
 	RecalculateOrders(ctx context.Context, startDate, endDate, company string) ([]*model.OrdersSummary, error)
 	GetDeliveryTypes(ctx context.Context, company, productType, startDate, endDate string) (*model.DeliveryTypesResult, error)
 	SearchOrder(ctx context.Context, orderNumber string) ([]*model.OrderSearchLine, error)
 	GetOrdersCSV(ctx context.Context, params OrdersCSVParams) (*OrdersCSVStream, error)
-	GetErrorCodes(ctx context.Context, company, productType, fulfillmentType, marketPlace, startDate, endDate string) (*model.ErrorCodesResult, error)
+	GetErrorCodes(ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string) (*model.ErrorCodesResult, error)
 	BulkCheckOrders(ctx context.Context, candidates []string) ([]*model.BulkCheckDetailLine, error)
 	GetErrorCodesCSV(ctx context.Context, params ErrorCodesCSVParams) (header []string, rows [][]string, truncated bool, err error)
 	GetAtpDecommRows(ctx context.Context, company, fulfillmentType, startDate, endDate string) (rows []*model.AtpDecommRow, truncated bool, err error)
-	GetErrorTrend(ctx context.Context, company, productType, fulfillmentType, marketPlace, startDate, endDate string) (days []*model.ErrorTrendDay, codes []*model.ErrorTrendCode, err error)
-	GetErrorCodesFulfillment(ctx context.Context, company, marketPlace, startDate, endDate string) (map[string]*model.FulfillmentSegment, error)
+	GetErrorTrend(ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string) (days []*model.ErrorTrendDay, codes []*model.ErrorTrendCode, err error)
+	GetErrorCodesFulfillment(ctx context.Context, company, marketPlace, channel, startDate, endDate string) (map[string]*model.FulfillmentSegment, error)
+	GetChannelBreakdown(ctx context.Context, company, productType, fulfillmentType, marketPlace, startDate, endDate string) ([]*model.ChannelCount, error)
 }
 
 // productTypeVariants espeja al helper homónimo de server.js: 'BIG TICKET'/'BT'
@@ -56,7 +57,7 @@ func NewOrdersRepository(client *bigquery.Client) OrdersRepository {
 
 func (o *Orders) GetOrdersSummary(
 	ctx context.Context,
-	productType, fulfillmentType, isMarketplace string,
+	productType, fulfillmentType, isMarketplace, channel string,
 	company, startDate, endDate string,
 ) ([]*model.OrdersSummary, error) {
 	loc, err := time.LoadLocation("America/Mexico_City")
@@ -92,6 +93,11 @@ func (o *Orders) GetOrdersSummary(
 	if fulfillmentType != "" {
 		filters.WriteString(" AND fulfillmentType = @fulfillmentType")
 		params = append(params, bigquery.QueryParameter{Name: "fulfillmentType", Value: fulfillmentType})
+	}
+
+	if channel != "" {
+		filters.WriteString(" AND UPPER(TRIM(channel)) = @channel")
+		params = append(params, bigquery.QueryParameter{Name: "channel", Value: strings.ToUpper(strings.TrimSpace(channel))})
 	}
 
 	if isMarketplace != "" {

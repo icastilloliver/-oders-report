@@ -34,6 +34,8 @@ type ErrorCodesCSVParams struct {
 	FulfillmentType string
 	// MarketPlace filtra por tipo de producto ('true'|'false'); vacío = todos.
 	MarketPlace string
+	// Channel filtra por canal de venta ya normalizado a mayúsculas; vacío = todos.
+	Channel string
 	// Codes es la lista de errorCode normalizados a incluir. nil = todos.
 	Codes []string
 }
@@ -69,6 +71,12 @@ func (o *Orders) GetErrorCodesCSV(ctx context.Context, p ErrorCodesCSVParams) (h
 		params = append(params, bigquery.QueryParameter{Name: "marketPlace", Value: p.MarketPlace == "true"})
 	}
 
+	var filterChannel string
+	if p.Channel != "" {
+		filterChannel = "AND UPPER(TRIM(channel)) = @channel"
+		params = append(params, bigquery.QueryParameter{Name: "channel", Value: p.Channel})
+	}
+
 	var filterCodes string
 	if p.Codes != nil {
 		filterCodes = "AND errorCodeNormalizado IN UNNEST(@codes)"
@@ -90,6 +98,7 @@ func (o *Orders) GetErrorCodesCSV(ctx context.Context, p ErrorCodesCSVParams) (h
 				%s
 				%s
 				%s
+				%s
 				AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
 				AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
 		)
@@ -98,7 +107,7 @@ func (o *Orders) GetErrorCodesCSV(ctx context.Context, p ErrorCodesCSVParams) (h
 			%s
 		ORDER BY ingestionTimestamp
 		LIMIT %d
-	`, errorCodeNormSQL, filterProductType, filterFulfillment, filterMarketplace, filterCodes, ErrorCodesCSVMaxRows)
+	`, errorCodeNormSQL, filterProductType, filterFulfillment, filterMarketplace, filterChannel, filterCodes, ErrorCodesCSVMaxRows)
 
 	q := o.client.Query(query)
 	q.Parameters = params

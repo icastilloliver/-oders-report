@@ -33,7 +33,7 @@ type errorCodeRow struct {
 // errorCode" del dashboard SBB Decomm.
 func (o *Orders) GetErrorCodes(
 	ctx context.Context,
-	company, productType, fulfillmentType, marketPlace, startDate, endDate string,
+	company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string,
 ) (*model.ErrorCodesResult, error) {
 	params := []bigquery.QueryParameter{
 		{Name: "company", Value: company},
@@ -60,6 +60,12 @@ func (o *Orders) GetErrorCodes(
 		params = append(params, bigquery.QueryParameter{Name: "marketPlace", Value: marketPlace == "true"})
 	}
 
+	var filterChannel string
+	if channel != "" {
+		filterChannel = "AND UPPER(TRIM(channel)) = @channel"
+		params = append(params, bigquery.QueryParameter{Name: "channel", Value: channel})
+	}
+
 	query := fmt.Sprintf(`
 		WITH base AS (
 			SELECT
@@ -75,6 +81,7 @@ func (o *Orders) GetErrorCodes(
 				%s
 				%s
 				%s
+				%s
 				AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
 				AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
 		)
@@ -86,7 +93,7 @@ func (o *Orders) GetErrorCodes(
 		WHERE clasificacion = 'Error'
 		GROUP BY errorCode
 		ORDER BY total DESC
-	`, errorCodeNormSQL, filterProductType, filterFulfillment, filterMarketplace)
+	`, errorCodeNormSQL, filterProductType, filterFulfillment, filterMarketplace, filterChannel)
 
 	q := o.client.Query(query)
 	q.Parameters = params

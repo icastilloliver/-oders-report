@@ -2814,3 +2814,10 @@ footer code {
   font-variant-numeric: tabular-nums;
 }
 .etrend__table th .bulk-codes__dot { margin-right: 5px; }
+
+/* ── Pastel por canal: tasa de error en la leyenda (modo Con Error) ── */
+.channelpie__tasa {
+  font-style: normal;
+  color: var(--text-3);
+  font-size: 11.5px;
+}

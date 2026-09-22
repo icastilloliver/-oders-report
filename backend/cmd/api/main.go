@@ -59,6 +59,7 @@ func main() {
 	http.HandleFunc("/api/error-codes-fulfillment", ordersHandler.HandlerErrorCodesFulfillment)
 	http.HandleFunc("/api/atp-decomm-rows", ordersHandler.HandlerAtpDecommRows)
 	http.HandleFunc("/api/atp-validate", ordersHandler.HandlerAtpValidate)
+	http.HandleFunc("/api/channel-breakdown", ordersHandler.HandlerChannelBreakdown)
 
 	// Sirve el build del frontend (y su fallback a index.html) para
 	// cualquier ruta que no sea /api/*. En Cloud Run, el binario Go es lo

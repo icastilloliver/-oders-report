@@ -37,6 +37,7 @@ type OrdersCSVParams struct {
 	ProductType     string
 	FulfillmentType string
 	MarketPlace     string
+	Channel         string
 }
 
 // OrdersCSVPageSize fija el tamaño de página del RowIterator para que los
@@ -235,6 +236,15 @@ func buildOrdersCSVQuery(p OrdersCSVParams) (string, []bigquery.QueryParameter, 
 		var filterFulfillment string
 		if p.FulfillmentType != "" {
 			filterFulfillment = "AND fulfillmentType = @fulfillmentType"
+			// Sin este append el filtro de surtido tronaba en BigQuery por
+			// parámetro faltante (bug del port original a Go).
+			params = append(params, bigquery.QueryParameter{Name: "fulfillmentType", Value: p.FulfillmentType})
+		}
+
+		var filterChannel string
+		if p.Channel != "" {
+			filterChannel = "AND UPPER(TRIM(channel)) = @channel"
+			params = append(params, bigquery.QueryParameter{Name: "channel", Value: p.Channel})
 		}
 
 		var filterMarketPlace string
@@ -260,11 +270,12 @@ func buildOrdersCSVQuery(p OrdersCSVParams) (string, []bigquery.QueryParameter, 
 					%s
 					%s
 					%s
+					%s
 					AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
 					AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
 			)
 			SELECT * FROM base WHERE clasificacion IN ('Error', 'Plan B')
-		`, filterProductType, filterFulfillment, filterMarketPlace)
+		`, filterProductType, filterFulfillment, filterMarketPlace, filterChannel)
 
 		return query, params, "", nil
 

@@ -40,6 +40,7 @@ var (
 	ErrAtpTooManyItems = fmt.Errorf("máximo %d items por petición. Divide el lote", AtpMaxItems)
 	ErrAtpMissingAuth  = errors.New("falta OMS_ATP_AUTH en backend/.env (credencial Basic del OMS de Suburbia)")
 	ErrInvalidCompany  = errors.New("company inválida")
+	ErrInvalidChannel  = errors.New("channel inválido")
 )
 
 var (
@@ -59,6 +60,7 @@ var (
 	atpErrDescAttr   = regexp.MustCompile(`\bErrorDescription="([^"]*)"`)
 
 	atpCompanyRegex = regexp.MustCompile(`^[A-Z]{2,4}$`)
+	channelRegex    = regexp.MustCompile(`^[A-Za-z]{2,10}$`)
 	dateOnlyRegex   = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 )
 
@@ -335,8 +337,12 @@ func (o *OrdersService) GetAtpDecommRows(
 
 // GetErrorTrend valida filtros y regresa la serie diaria de errores.
 func (o *OrdersService) GetErrorTrend(
-	ctx context.Context, company, productType, fulfillmentType, marketPlace, startDate, endDate string,
+	ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string,
 ) (days []*model.ErrorTrendDay, codes []*model.ErrorTrendCode, err error) {
+	channel, err = normalizeChannel(channel)
+	if err != nil {
+		return nil, nil, err
+	}
 	if company == "" {
 		company = "SB"
 	}
@@ -355,14 +361,18 @@ func (o *OrdersService) GetErrorTrend(
 	if marketPlace != "" && marketPlace != "true" && marketPlace != "false" {
 		return nil, nil, ErrInvalidMarketPlace
 	}
-	return o.order.GetErrorTrend(ctx, company, productType, fulfillmentType, marketPlace, startDate, endDate)
+	return o.order.GetErrorTrend(ctx, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate)
 }
 
 // GetErrorCodesFulfillment valida filtros y regresa la comparativa por
 // tipo de surtido (LP Decomm).
 func (o *OrdersService) GetErrorCodesFulfillment(
-	ctx context.Context, company, marketPlace, startDate, endDate string,
+	ctx context.Context, company, marketPlace, channel, startDate, endDate string,
 ) (map[string]*model.FulfillmentSegment, error) {
+	channel, err := normalizeChannel(channel)
+	if err != nil {
+		return nil, err
+	}
 	if company == "" {
 		company = "LP"
 	}
@@ -378,7 +388,20 @@ func (o *OrdersService) GetErrorCodesFulfillment(
 	if marketPlace != "" && marketPlace != "true" && marketPlace != "false" {
 		return nil, ErrInvalidMarketPlace
 	}
-	return o.order.GetErrorCodesFulfillment(ctx, company, marketPlace, startDate, endDate)
+	return o.order.GetErrorCodesFulfillment(ctx, company, marketPlace, channel, startDate, endDate)
+}
+
+// normalizeChannel valida el filtro de canal y lo regresa en mayúsculas
+// (la columna se compara con UPPER(TRIM(channel))); vacío = sin filtro.
+func normalizeChannel(c string) (string, error) {
+	c = strings.TrimSpace(c)
+	if c == "" {
+		return "", nil
+	}
+	if !channelRegex.MatchString(c) {
+		return "", ErrInvalidChannel
+	}
+	return strings.ToUpper(c), nil
 }
 
 // validateRealDates exige fechas de calendario reales, no solo con la forma
@@ -393,4 +416,30 @@ func validateRealDates(dates ...string) error {
 		}
 	}
 	return nil
+}
+
+// GetChannelBreakdown valida filtros y regresa el reparto por canal del
+// rango (misma clasificación y filtros que el resto de la vista).
+func (o *OrdersService) GetChannelBreakdown(
+	ctx context.Context, company, productType, fulfillmentType, marketPlace, startDate, endDate string,
+) ([]*model.ChannelCount, error) {
+	if company == "" {
+		company = "LP"
+	}
+	if startDate == "" {
+		startDate = "2026-05-01"
+	}
+	if endDate == "" {
+		endDate = "2026-05-28"
+	}
+	if err := validateRealDates(startDate, endDate); err != nil {
+		return nil, err
+	}
+	if fulfillmentType != "" && !slices.Contains(repository.FulfillmentTypes, fulfillmentType) {
+		return nil, ErrInvalidFulfillmentType
+	}
+	if marketPlace != "" && marketPlace != "true" && marketPlace != "false" {
+		return nil, ErrInvalidMarketPlace
+	}
+	return o.order.GetChannelBreakdown(ctx, company, productType, fulfillmentType, marketPlace, startDate, endDate)
 }

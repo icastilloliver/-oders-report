@@ -20,6 +20,10 @@ import {
   EyeOff,
   ShoppingBag,
   Radar,
+  Smartphone,
+  Monitor,
+  Globe,
+  Phone,
   TrendingUp,
 } from 'lucide-react';
 import Sidebar from './components/Sidebar.jsx';
@@ -34,6 +38,8 @@ import AtpDecomm from './components/AtpDecomm.jsx';
 import ErrorCodePie from './components/ErrorCodePie.jsx';
 import ErrorFulfillmentSplit from './components/ErrorFulfillmentSplit.jsx';
 import ErrorTrendChart from './components/ErrorTrendChart.jsx';
+import ErrorDailyStack from './components/ErrorDailyStack.jsx';
+import ChannelPie from './components/ChannelPie.jsx';
 import { KpiSkeleton, ChartSkeleton } from './components/Skeleton.jsx';
 import CalendarWidget from './components/CalendarWidget.jsx';
 import liverpoolLogo from './assets/liverpool-logo.svg';
@@ -178,6 +184,7 @@ function App() {
   const [errorCodes, setErrorCodes] = useState(null); // { data, total } · tabs SBB/LP Decomm
   const [fsplit, setFsplit] = useState(null); // error por tipo de surtido · solo LP Decomm
   const [errorTrend, setErrorTrend] = useState(null); // serie diaria de errores · tabs Decomm
+  const [channels, setChannels] = useState(null); // reparto por canal · tabs Decomm
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [startDate, setStartDate] = useState(() => toISO(startOfMonth(today())));
@@ -187,8 +194,11 @@ function App() {
   // Filtro de tipo de surtido: 'all' | 'Fulfillment_Type_Liverpool' | 'Liverpool_CNC_PICK_PACK'
   const [fulfillment, setFulfillment] = useState('all');
   // Filtro por tipo de producto (columna marketPlace, solo LP Decomm):
-  // 'all' | 'true' (Marketplace) | 'false' (catálogo propio)
-  const [marketplace, setMarketplace] = useState('all');
+  // 'all' | 'true' (Marketplace) | 'false' (catálogo propio).
+  // Por regla de negocio la vista abre SIEMPRE en Catálogo propio.
+  const [marketplace, setMarketplace] = useState('false');
+  // Filtro principal por canal de venta: 'all' | APP | WEB | WAP | CSC
+  const [channel, setChannel] = useState('all');
   // Mostrar/ocultar la serie % Error en la gráfica (solo tab SBB Decomm)
   const [showErrorSeries, setShowErrorSeries] = useState(true);
   const [activeQuick, setActiveQuick] = useState(null);
@@ -254,6 +264,12 @@ function App() {
         prevParams += `&marketPlace=${marketplace}`;
       }
 
+      // Canal de venta · el recalculo no trae channel en su payload
+      if (channel !== 'all' && !isRecalc) {
+        queryParams += `&channel=${channel}`;
+        prevParams += `&channel=${channel}`;
+      }
+
       const [resCurr, resPrev] = await Promise.all([
         fetch(`${endpoint}${queryParams}`),
         fetch(`${endpoint}${prevParams}`).catch(() => null),
@@ -286,12 +302,21 @@ function App() {
           });
           if (fulfillment !== 'all') p.set('fulfillmentType', fulfillment);
           if (company === 'LP_DECOMM' && marketplace !== 'all') p.set('marketPlace', marketplace);
+          if (channel !== 'all') p.set('channel', channel);
           const errorCodesQuery = p.toString();
 
-          const [resCodes, resTrend] = await Promise.all([
+          // El pastel de canales COMPARA canales: ignora el filtro de canal
+          // (los demás filtros sí aplican), igual que la comparativa por
+          // surtido ignora el filtro de surtido.
+          const pChannels = new URLSearchParams(p);
+          pChannels.delete('channel');
+
+          const [resCodes, resTrend, resChannels] = await Promise.all([
             fetch(`/api/error-codes?${errorCodesQuery}`),
             fetch(`/api/error-trend?${errorCodesQuery}`),
+            fetch(`/api/channel-breakdown?${pChannels.toString()}`),
           ]);
+          setChannels(resChannels.ok ? await resChannels.json() : null);
           setErrorCodes(
             resCodes.ok ? { ...(await resCodes.json()), query: errorCodesQuery } : null
           );
@@ -299,10 +324,12 @@ function App() {
         } catch {
           setErrorCodes(null); // el desglose es complementario: no rompe la vista
           setErrorTrend(null);
+          setChannels(null);
         }
       } else {
         setErrorCodes(null);
         setErrorTrend(null);
+        setChannels(null);
       }
 
       /* Comparativa de error por tipo de surtido: exclusiva de LP Decomm.
@@ -315,6 +342,7 @@ function App() {
             company: 'LP',
           });
           if (marketplace !== 'all') p.set('marketPlace', marketplace);
+          if (channel !== 'all') p.set('channel', channel);
           const resSplit = await fetch(`/api/error-codes-fulfillment?${p}`);
           setFsplit(resSplit.ok ? { ...(await resSplit.json()), query: p.toString() } : null);
         } catch {
@@ -328,7 +356,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, company, view, fulfillment, marketplace]);
+  }, [startDate, endDate, company, view, fulfillment, marketplace, channel]);
 
   // Usa fetch (y no window.open) para no abrir una pestaña en blanco: así se
   // puede mostrar el spinner en el botón y quedarse en la misma página.
@@ -349,6 +377,9 @@ function App() {
     }
     if (marketplace !== 'all' && company === 'LP_DECOMM') {
       url += `&marketPlace=${marketplace}`;
+    }
+    if (channel !== 'all' && !company.includes('RECALC')) {
+      url += `&channel=${channel}`;
     }
 
     setCsvExporting(true);
@@ -388,7 +419,7 @@ function App() {
     // --brand-primary por JS: queda fijo en :root (styles.css).
     document.documentElement.setAttribute('data-company', company);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [company, view, fulfillment, marketplace]);
+  }, [company, view, fulfillment, marketplace, channel]);
 
   /* Reloj del header: un único intervalo durante toda la vida del componente */
   useEffect(() => {
@@ -508,7 +539,12 @@ function App() {
         view={view}
         onSelectView={switchView}
         company={company}
-        onSelectCompany={setCompany}
+        onSelectCompany={(c) => {
+          // Al entrar a LP Decomm el filtro de producto regresa a su default
+          // de negocio (Catálogo propio), aunque se haya cambiado antes.
+          if (c === 'LP_DECOMM') setMarketplace('false');
+          setCompany(c);
+        }}
       />
 
       <div className="container">
@@ -604,6 +640,66 @@ function App() {
               <Store size={12} />
               Catálogo propio
             </button>
+          </div>
+        )}
+
+        {/* Filtro principal por canal de venta · aplica a KPIs, gráficas y export */}
+        {view === 'planes' && (
+          <div className="quick-ranges" role="group" aria-label="Canal de venta">
+            <span className="quick-ranges__label">
+              <Globe size={12} /> Canal
+            </span>
+            <button
+              type="button"
+              className={`chip ${channel === 'all' ? 'active' : ''}`}
+              onClick={() => setChannel('all')}
+              disabled={company.includes('RECALC')}
+            >
+              Todos
+            </button>
+            <button
+              type="button"
+              className={`chip ${channel === 'APP' ? 'active' : ''}`}
+              onClick={() => setChannel('APP')}
+              disabled={company.includes('RECALC')}
+              title="Aplicación móvil"
+            >
+              <Smartphone size={12} />
+              APP
+            </button>
+            <button
+              type="button"
+              className={`chip ${channel === 'WEB' ? 'active' : ''}`}
+              onClick={() => setChannel('WEB')}
+              disabled={company.includes('RECALC')}
+              title="Sitio web escritorio"
+            >
+              <Monitor size={12} />
+              WEB
+            </button>
+            <button
+              type="button"
+              className={`chip ${channel === 'WAP' ? 'active' : ''}`}
+              onClick={() => setChannel('WAP')}
+              disabled={company.includes('RECALC')}
+              title="Web móvil"
+            >
+              <Globe size={12} />
+              WAP
+            </button>
+            <button
+              type="button"
+              className={`chip ${channel === 'CSC' ? 'active' : ''}`}
+              onClick={() => setChannel('CSC')}
+              disabled={company.includes('RECALC')}
+              title="Centro de servicio a clientes"
+            >
+              <Phone size={12} />
+              CSC
+            </button>
+            {company.includes('RECALC') && (
+              <span className="quick-ranges__note">No aplica al recalculo</span>
+            )}
           </div>
         )}
 
@@ -788,6 +884,50 @@ function App() {
               hideError={company === 'SBB_DECOMM' && !showErrorSeries}
             />
           </div>
+
+          {/* % Error diario abierto por causal · tabs SBB Decomm y LP Decomm */}
+          {(company === 'SBB_DECOMM' || company === 'LP_DECOMM') &&
+            errorTrend &&
+            errorTrend.days?.length > 0 && (
+            <div className="chart-card">
+              <div className="chart-card__head">
+                <div>
+                  <h2>
+                    <BarChart3 size={18} strokeWidth={2.2} />
+                    % Error diario por causal
+                  </h2>
+                  <p className="subtitle">
+                    El segmento Error de la gráfica de arriba, abierto por errorCode: la altura
+                    de cada barra es el % Error del día y sus segmentos son las causales (mismos
+                    colores que la dona) · pasa el cursor para ver cifras exactas
+                  </p>
+                </div>
+              </div>
+              <ErrorDailyStack days={errorTrend.days} codes={errorTrend.codes} />
+            </div>
+          )}
+
+          {/* Reparto por canal · tabs SBB Decomm y LP Decomm */}
+          {(company === 'SBB_DECOMM' || company === 'LP_DECOMM') &&
+            channels &&
+            channels.total > 0 && (
+            <div className="chart-card">
+              <div className="chart-card__head">
+                <div>
+                  <h2>
+                    <PieChart size={18} strokeWidth={2.2} />
+                    Reparto por canal
+                  </h2>
+                  <p className="subtitle">
+                    Reparto por canal de venta con los filtros activos: alterna entre todas
+                    las líneas del rango y solo las que traen Error (qué % del Error aporta cada
+                    canal) · compara canales, así que ignora el filtro de canal
+                  </p>
+                </div>
+              </div>
+              <ChannelPie data={channels.data} total={channels.total} />
+            </div>
+          )}
 
           {/* Desglose de errorCode · tabs SBB Decomm y LP Decomm */}
           {(company === 'SBB_DECOMM' || company === 'LP_DECOMM') && errorCodes && (

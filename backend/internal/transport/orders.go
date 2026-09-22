@@ -58,11 +58,12 @@ func (h *OrdersHandler) handleGetOrdersSummary(w http.ResponseWriter, r *http.Re
 	productType := r.URL.Query().Get("productType")
 	fulfillmentType := r.URL.Query().Get("fulfillmentType")
 	marketplace := r.URL.Query().Get("marketPlace")
+	channel := r.URL.Query().Get("channel")
 	company := r.URL.Query().Get("company")
 	startDate := r.URL.Query().Get("start")
 	endDate := r.URL.Query().Get("end")
 
-	summary, err := h.service.GetOrdersSummary(productType, fulfillmentType, marketplace, company, startDate, endDate)
+	summary, err := h.service.GetOrdersSummary(productType, fulfillmentType, marketplace, channel, company, startDate, endDate)
 	if err != nil {
 		utils.Logging("ERROR", "Error getting orders summary", "", map[string]any{
 			"query": r.URL.Query(),
@@ -177,10 +178,11 @@ func (h *OrdersHandler) handleGetErrorCodes(w http.ResponseWriter, r *http.Reque
 	productType := r.URL.Query().Get("productType")
 	fulfillmentType := r.URL.Query().Get("fulfillmentType")
 	marketPlace := r.URL.Query().Get("marketPlace")
+	channel := r.URL.Query().Get("channel")
 	startDate := r.URL.Query().Get("start")
 	endDate := r.URL.Query().Get("end")
 
-	result, err := h.service.GetErrorCodes(company, productType, fulfillmentType, marketPlace, startDate, endDate)
+	result, err := h.service.GetErrorCodes(company, productType, fulfillmentType, marketPlace, channel, startDate, endDate)
 	if err != nil {
 		utils.Logging("ERROR", "Error getting error codes", "", map[string]any{
 			"query": r.URL.Query(),
@@ -189,7 +191,8 @@ func (h *OrdersHandler) handleGetErrorCodes(w http.ResponseWriter, r *http.Reque
 		w.Header().Set("Content-Type", "application/json")
 		if errors.Is(err, services.ErrInvalidDateFormat) ||
 			errors.Is(err, services.ErrInvalidFulfillmentType) ||
-			errors.Is(err, services.ErrInvalidMarketPlace) {
+			errors.Is(err, services.ErrInvalidMarketPlace) ||
+			errors.Is(err, services.ErrInvalidChannel) {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"error": err.Error(),
@@ -262,8 +265,9 @@ func (h *OrdersHandler) handleOrdersCSV(w http.ResponseWriter, r *http.Request) 
 	productType := r.URL.Query().Get("productType")
 	fulfillmentType := r.URL.Query().Get("fulfillmentType")
 	marketPlace := r.URL.Query().Get("marketPlace")
+	channel := r.URL.Query().Get("channel")
 
-	stream, filename, err := h.service.ExportOrdersCSV(r.Context(), start, end, company, csvType, productType, fulfillmentType, marketPlace)
+	stream, filename, err := h.service.ExportOrdersCSV(r.Context(), start, end, company, csvType, productType, fulfillmentType, marketPlace, channel)
 	if err != nil {
 		utils.Logging("ERROR", "Error exporting orders csv", "", map[string]any{
 			"query": r.URL.Query(),
@@ -273,6 +277,7 @@ func (h *OrdersHandler) handleOrdersCSV(w http.ResponseWriter, r *http.Request) 
 		case errors.Is(err, services.ErrMissingCSVParams),
 			errors.Is(err, services.ErrInvalidFulfillmentType),
 			errors.Is(err, services.ErrInvalidMarketPlace),
+			errors.Is(err, services.ErrInvalidChannel),
 			errors.Is(err, services.ErrInvalidCSVType):
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
@@ -408,11 +413,12 @@ func (h *OrdersHandler) handleGetErrorCodesCSV(w http.ResponseWriter, r *http.Re
 	productType := r.URL.Query().Get("productType")
 	fulfillmentType := r.URL.Query().Get("fulfillmentType")
 	marketPlace := r.URL.Query().Get("marketPlace")
+	channel := r.URL.Query().Get("channel")
 	codes := r.URL.Query().Get("codes")
 	label := r.URL.Query().Get("label")
 
 	header, rows, truncated, filename, err := h.service.GetErrorCodesCSV(
-		r.Context(), start, end, company, productType, fulfillmentType, marketPlace, codes, label,
+		r.Context(), start, end, company, productType, fulfillmentType, marketPlace, channel, codes, label,
 	)
 	if err != nil {
 		utils.Logging("ERROR", "Error exporting error codes csv", "", map[string]any{
@@ -423,6 +429,7 @@ func (h *OrdersHandler) handleGetErrorCodesCSV(w http.ResponseWriter, r *http.Re
 		case errors.Is(err, services.ErrInvalidDateFormat),
 			errors.Is(err, services.ErrInvalidFulfillmentType),
 			errors.Is(err, services.ErrInvalidMarketPlace),
+			errors.Is(err, services.ErrInvalidChannel),
 			errors.Is(err, services.ErrCodesEmpty),
 			errors.Is(err, services.ErrTooManyCodes),
 			errors.Is(err, services.ErrCodeTooLong):
