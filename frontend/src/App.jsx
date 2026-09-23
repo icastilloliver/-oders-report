@@ -42,6 +42,7 @@ import ErrorDailyStack from './components/ErrorDailyStack.jsx';
 import ChannelPie from './components/ChannelPie.jsx';
 import { KpiSkeleton, ChartSkeleton } from './components/Skeleton.jsx';
 import CalendarWidget from './components/CalendarWidget.jsx';
+import DateRange from './components/DateRange.jsx';
 import liverpoolLogo from './assets/liverpool-logo.svg';
 
 /* ───────────────────────── helpers ───────────────────────── */
@@ -724,25 +725,14 @@ function App() {
         )}
 
         <div className="filters">
-          <div className="field">
-            <label htmlFor="start-date">Desde</label>
-            <CalendarWidget
-              id="start-date"
-              value={startDate}
-              onChange={handleDateChange(setStartDate)}
-              label="Fecha desde"
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="end-date">Hasta</label>
-            <CalendarWidget
-              id="end-date"
-              value={endDate}
-              onChange={handleDateChange(setEndDate)}
-              label="Fecha hasta"
-            />
-          </div>
+          <DateRange
+            startId="start-date"
+            endId="end-date"
+            startDate={startDate}
+            endDate={endDate}
+            onStartChange={handleDateChange(setStartDate)}
+            onEndChange={handleDateChange(setEndDate)}
+          />
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
             <button
@@ -907,31 +897,31 @@ function App() {
             </div>
           )}
 
-          {/* Reparto por canal · tabs SBB Decomm y LP Decomm */}
+          {/* Reparto por canal + composición del % Error, lado a lado para
+              leer de un vistazo dónde ocurre el error y qué lo causa */}
           {(company === 'SBB_DECOMM' || company === 'LP_DECOMM') &&
-            channels &&
-            channels.total > 0 && (
-            <div className="chart-card">
-              <div className="chart-card__head">
-                <div>
-                  <h2>
-                    <PieChart size={18} strokeWidth={2.2} />
-                    Reparto por canal
-                  </h2>
-                  <p className="subtitle">
-                    Reparto por canal de venta con los filtros activos: alterna entre todas
-                    las líneas del rango y solo las que traen Error (qué % del Error aporta cada
-                    canal) · compara canales, así que ignora el filtro de canal
-                  </p>
+            ((channels && channels.total > 0) || errorCodes) && (
+            <div className="chart-row">
+              {channels && channels.total > 0 && (
+                <div className="chart-card">
+                  <div className="chart-card__head">
+                    <div>
+                      <h2>
+                        <PieChart size={18} strokeWidth={2.2} />
+                        Reparto por canal
+                      </h2>
+                      <p className="subtitle">
+                        Alterna entre todas las líneas del rango y solo las que traen Error
+                        (qué % del Error aporta cada canal) · compara canales, así que ignora
+                        el filtro de canal
+                      </p>
+                    </div>
+                  </div>
+                  <ChannelPie data={channels.data} total={channels.total} />
                 </div>
-              </div>
-              <ChannelPie data={channels.data} total={channels.total} />
-            </div>
-          )}
-
-          {/* Desglose de errorCode · tabs SBB Decomm y LP Decomm */}
-          {(company === 'SBB_DECOMM' || company === 'LP_DECOMM') && errorCodes && (
-            <div className="chart-card">
+              )}
+              {errorCodes && (
+                <div className="chart-card">
               <div className="chart-card__head">
                 <div>
                   <h2>
@@ -956,11 +946,13 @@ function App() {
                   </p>
                 </div>
               </div>
-              <ErrorCodePie
-                data={errorCodes.data}
-                total={errorCodes.total}
-                csvQuery={errorCodes.query}
-              />
+                  <ErrorCodePie
+                    data={errorCodes.data}
+                    total={errorCodes.total}
+                    csvQuery={errorCodes.query}
+                  />
+                </div>
+              )}
             </div>
           )}
 

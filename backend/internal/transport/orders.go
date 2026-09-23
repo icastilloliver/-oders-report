@@ -224,15 +224,22 @@ func (h *OrdersHandler) handleGetErrorCodes(w http.ResponseWriter, r *http.Reque
 
 func (h *OrdersHandler) handleOrderSearch(w http.ResponseWriter, r *http.Request) {
 	orderNumber := strings.TrimSpace(r.URL.Query().Get("orderNumber"))
+	sku := strings.TrimSpace(r.URL.Query().Get("sku"))
+	start := r.URL.Query().Get("start")
+	end := r.URL.Query().Get("end")
 
-	lines, err := h.service.SearchOrder(orderNumber)
+	lines, truncated, err := h.service.SearchOrder(orderNumber, sku, start, end)
 	if err != nil {
 		utils.Logging("ERROR", "Error searching order", "", map[string]any{
 			"query": r.URL.Query(),
 			"error": err.Error(),
 		})
 		w.Header().Set("Content-Type", "application/json")
-		if errors.Is(err, services.ErrInvalidOrderNumber) {
+		if errors.Is(err, services.ErrInvalidOrderNumber) ||
+			errors.Is(err, services.ErrInvalidSku) ||
+			errors.Is(err, services.ErrSearchMissingQuery) ||
+			errors.Is(err, services.ErrSearchDatesPair) ||
+			errors.Is(err, services.ErrInvalidDateFormat) {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"error": err.Error(),
@@ -249,7 +256,9 @@ func (h *OrdersHandler) handleOrderSearch(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"orderNumber": orderNumber,
+		"sku":         sku,
 		"found":       len(lines) > 0,
+		"truncated":   truncated,
 		"lines":       lines,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

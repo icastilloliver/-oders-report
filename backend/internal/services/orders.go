@@ -16,7 +16,7 @@ var ErrInvalidDateFormat = errors.New("formato de fecha inválido")
 
 // ErrInvalidOrderNumber señala un orderNumber que no cumple el formato
 // esperado, para que el transport la responda como 400 en vez de 500.
-var ErrInvalidOrderNumber = errors.New("el número de orden debe tener entre 6 y 20 dígitos")
+var ErrInvalidOrderNumber = errors.New("el número de orden debe tener entre 6 y 64 caracteres alfanuméricos")
 
 // Sentinels del export CSV de órdenes: distinguen errores de validación
 // (400), ausencia de resultados (404) y fallas de BigQuery (500).
@@ -219,14 +219,65 @@ func (o *OrdersService) GetErrorCodes(
 	)
 }
 
-func (o *OrdersService) SearchOrder(orderNumber string) ([]*model.OrderSearchLine, error) {
-	var orderNumberRegex = regexp.MustCompile(`^\d{6,20}$`)
+// Sentinels de la búsqueda por orden/SKU.
+var (
+	ErrSearchMissingQuery = errors.New("proporciona un número de orden o un SKU")
+	ErrInvalidSku         = errors.New("el SKU debe ser alfanumérico de 4 a 20 caracteres")
+	ErrSearchDatesPair    = errors.New("proporciona ambas fechas del rango (o ninguna)")
+)
 
-	if !orderNumberRegex.MatchString(orderNumber) {
-		return nil, ErrInvalidOrderNumber
+func (o *OrdersService) SearchOrder(orderNumber, sku, start, end string) ([]*model.OrderSearchLine, bool, error) {
+	var skuRegex = regexp.MustCompile(`^[A-Za-z0-9]{4,20}$`)
+
+	orderNumber = strings.TrimSpace(orderNumber)
+	sku = strings.TrimSpace(sku)
+
+	if orderNumber == "" && sku == "" {
+		return nil, false, ErrSearchMissingQuery
 	}
 
-	return o.order.SearchOrder(context.Background(), orderNumber)
+	// El rango es opcional, pero en pareja: solo una fecha no define ventana.
+	if (start == "") != (end == "") {
+		return nil, false, ErrSearchDatesPair
+	}
+	if start != "" {
+		if err := validateRealDates(start, end); err != nil {
+			return nil, false, err
+		}
+	}
+
+	p := repository.OrderSearchParams{Start: start, End: end}
+	if orderNumber != "" {
+		// Mismo criterio que el cotejo masivo: remisiones alfanuméricas
+		// (sg2609080001809, KS0000438222, UUIDs) y, como red de seguridad,
+		// la variante sin prefijo de letras por si la tabla la guarda así.
+		if !orderIDRegex.MatchString(orderNumber) {
+			return nil, false, ErrInvalidOrderNumber
+		}
+		p.OrderNumberVariants = []string{orderNumber}
+		if bare, ok := bareID(orderNumber); ok {
+			p.OrderNumberVariants = append(p.OrderNumberVariants, bare)
+		}
+	} else {
+		if !skuRegex.MatchString(sku) {
+			return nil, false, ErrInvalidSku
+		}
+		// Variantes con/sin prefijo SB: Suburbia guarda 'SB5014548396' pero
+		// OMS y la gente citan '5014548396'; se buscan ambas grafías.
+		variants := []string{sku}
+		upper := strings.ToUpper(sku)
+		if strings.HasPrefix(upper, "SB") && len(sku) > 2 {
+			variants = append(variants, sku[2:])
+		} else {
+			variants = append(variants, "SB"+sku)
+		}
+		if upper != sku {
+			variants = append(variants, upper)
+		}
+		p.SkuVariants = variants
+	}
+
+	return o.order.SearchOrder(context.Background(), p)
 }
 
 // ExportOrdersCSV valida los filtros del export y, si todo es correcto,

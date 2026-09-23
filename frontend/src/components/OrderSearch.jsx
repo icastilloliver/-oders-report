@@ -1,3 +1,4 @@
+import DateRange from './DateRange.jsx';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Search,
@@ -17,6 +18,9 @@ import {
   Split,
   History,
   X,
+  Tag,
+  Hash,
+  Info,
 } from 'lucide-react';
 
 /* ─────────────────── helpers ─────────────────── */
@@ -60,10 +64,20 @@ const RECENT_KEY = 'orderSearchRecent';
 
 const loadRecent = () => {
   try {
-    return JSON.parse(sessionStorage.getItem(RECENT_KEY)) || [];
+    const raw = JSON.parse(sessionStorage.getItem(RECENT_KEY)) || [];
+    // Compat: antes se guardaban strings (solo órdenes)
+    return raw.map((r) => (typeof r === 'string' ? { m: 'orden', q: r } : r));
   } catch {
     return [];
   }
+};
+
+/** 'Hasta' inclusivo: el backend usa fin EXCLUSIVO, se manda el día siguiente */
+const nextDay = (iso) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + 1);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
 };
 
 /* ─────────────────── subcomponentes ─────────────────── */
@@ -171,13 +185,118 @@ function LineCard({ line, index }) {
   );
 }
 
+/* ─────────────────── resultados por SKU ─────────────────── */
+
+/** Tabla de líneas de un SKU a través de órdenes; la remisión es clickeable
+    y salta a la búsqueda por orden para ver el detalle completo. */
+function SkuResults({ result, onOpenOrder }) {
+  const { lines, sku, truncated } = result;
+  const ordenes = new Set(lines.map((l) => l.orderNumber)).size;
+  const conError = lines.filter((l) => String(l.hasError) === 'true').length;
+
+  return (
+    <section className="skures">
+      <header className="bulk-results__head">
+        <div>
+          <h2>
+            SKU <code>{sku}</code>
+            <CopyButton value={sku} title="Copiar SKU" />
+          </h2>
+          <p>
+            {lines.length} {lines.length === 1 ? 'línea' : 'líneas'} en {ordenes}{' '}
+            {ordenes === 1 ? 'orden' : 'órdenes'}
+            {conError > 0 ? ` · ${conError} con error` : ''} · da clic en una remisión para
+            abrir su detalle
+          </p>
+        </div>
+      </header>
+
+      {truncated && (
+        <div className="alert alert--info">
+          <Info className="alert__icon" size={18} />
+          <div>
+            <strong>Resultado truncado.</strong> Se muestran las 500 líneas más recientes;
+            acota el rango de fechas para ver el universo completo.
+          </div>
+        </div>
+      )}
+
+      <div className="skures__scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Remisión</th>
+              <th>Compra</th>
+              <th className="num">Cant.</th>
+              <th>Tienda</th>
+              <th>Destino</th>
+              <th>Promesa</th>
+              <th>Entrega</th>
+              <th>Estatus</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l, i) => {
+              const hasError = String(l.hasError) === 'true';
+              return (
+                <tr key={l.recordId || `${l.orderNumber}-${i}`}>
+                  <td>
+                    <button
+                      type="button"
+                      className="skures__link"
+                      onClick={() => onOpenOrder(l.orderNumber)}
+                      title="Abrir el detalle de esta orden"
+                    >
+                      {l.orderNumber}
+                    </button>
+                  </td>
+                  <td>{fmtDateTime(l.createdAt)}</td>
+                  <td className="num">{Number(l.quantity) || 1}</td>
+                  <td>{l.origen ? `Tienda ${l.origen}` : 'MKTP'}</td>
+                  <td>
+                    {titleCase(l.destinationCity || '')} · CP {l.zipCode || '—'}
+                  </td>
+                  <td>
+                    {l.edd1 ? (l.edd1 === l.edd2 ? fmtDate(l.edd1) : `${fmtDate(l.edd1)} → ${fmtDate(l.edd2)}`) : '—'}
+                  </td>
+                  <td>
+                    <DeliveryBadge tipo={l.tipoEntrega} />
+                  </td>
+                  <td>
+                    <span className={`badge ${hasError ? 'badge--noedd' : l.plan === 'B' ? 'badge--planb' : 'badge--plan'}`}>
+                      {hasError ? (
+                        <>
+                          <AlertTriangle size={11} strokeWidth={2.4} />
+                          Error {l.errorCode}
+                        </>
+                      ) : (
+                        <>
+                          <Check size={11} strokeWidth={2.8} />
+                          Plan {l.plan || '—'}
+                        </>
+                      )}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 /* ─────────────────── vista principal ─────────────────── */
 
 function OrderSearch() {
+  const [mode, setMode] = useState('orden'); // 'orden' | 'sku'
   const [query, setQuery] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState(null);
-  const [result, setResult] = useState(null); // { orderNumber, found, lines }
+  const [result, setResult] = useState(null); // { mode, found, lines, truncated, ... }
   const [recent, setRecent] = useState(loadRecent);
   const inputRef = useRef(null);
 
@@ -185,8 +304,13 @@ function OrderSearch() {
     inputRef.current?.focus();
   }, []);
 
-  const saveRecent = (num) => {
-    const next = [num, ...recent.filter((r) => r !== num)].slice(0, 5);
+  const sanitize = (raw, m) =>
+    m === 'orden'
+      ? String(raw).replace(/[^A-Za-z0-9._-]/g, '') // remisiones sg…, KS…, UUIDs
+      : String(raw).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+
+  const saveRecent = (m, q) => {
+    const next = [{ m, q }, ...recent.filter((r) => !(r.m === m && r.q === q))].slice(0, 5);
     setRecent(next);
     try {
       sessionStorage.setItem(RECENT_KEY, JSON.stringify(next));
@@ -195,23 +319,39 @@ function OrderSearch() {
     }
   };
 
-  const search = async (raw) => {
-    const num = String(raw ?? query).replace(/\D/g, '');
-    if (num.length < 6) {
-      setError('Escribe un número de orden de al menos 6 dígitos.');
+  const search = async (rawQ, rawMode) => {
+    const m = rawMode ?? mode;
+    const q = sanitize(rawQ ?? query, m);
+    if (m === 'orden' && q.length < 6) {
+      setError('Escribe una orden o remisión de al menos 6 caracteres.');
       setResult(null);
       return;
     }
-    setQuery(num);
+    if (m === 'sku' && q.length < 4) {
+      setError('Escribe un SKU de al menos 4 caracteres.');
+      setResult(null);
+      return;
+    }
+    if ((startDate === '') !== (endDate === '')) {
+      setError('Completa ambas fechas del rango, o déjalas vacías para buscar en los últimos 6 meses.');
+      return;
+    }
+    setMode(m);
+    setQuery(q);
     setSearching(true);
     setError(null);
     setResult(null);
     try {
-      const res = await fetch(`/api/order-search?orderNumber=${num}`);
+      const p = new URLSearchParams(m === 'orden' ? { orderNumber: q } : { sku: q });
+      if (startDate && endDate) {
+        p.set('start', startDate);
+        p.set('end', nextDay(endDate)); // Hasta inclusivo
+      }
+      const res = await fetch(`/api/order-search?${p}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-      setResult(json);
-      if (json.found) saveRecent(num);
+      setResult({ ...json, mode: m });
+      if (json.found) saveRecent(m, q);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -224,10 +364,16 @@ function OrderSearch() {
     search();
   };
 
-  const header = result?.found ? result.lines[0] : null;
+  /** Desde la tabla de SKU: abrir el detalle de una orden */
+  const openOrder = (num) => {
+    setMode('orden');
+    search(num, 'orden');
+  };
+
+  const header = result?.mode === 'orden' && result?.found ? result.lines[0] : null;
 
   const summary = useMemo(() => {
-    if (!result?.found) return null;
+    if (result?.mode !== 'orden' || !result?.found) return null;
     const lines = result.lines;
     const piezas = lines.reduce((a, l) => a + (Number(l.quantity) || 1), 0);
     const tiendas = [...new Set(lines.map((l) => l.origen).filter(Boolean))];
@@ -235,25 +381,63 @@ function OrderSearch() {
     return { skus: lines.length, piezas, tiendas, conError };
   }, [result]);
 
+  const rangoActivo = startDate && endDate;
+
   return (
     <div className="order-search">
       {/* ── Buscador ── */}
       <form className="search-hero" onSubmit={onSubmit} role="search">
         <label className="search-hero__label" htmlFor="order-search-input">
-          Buscar orden o remisión
+          {mode === 'orden' ? 'Buscar orden o remisión' : 'Buscar SKU'}
         </label>
+
+        <div className="search-hero__modes" role="tablist" aria-label="Buscar por">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'orden'}
+            className={`chip ${mode === 'orden' ? 'active' : ''}`}
+            onClick={() => {
+              setMode('orden');
+              setQuery('');
+              setResult(null);
+              setError(null);
+              inputRef.current?.focus();
+            }}
+          >
+            <Hash size={12} />
+            Por orden
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'sku'}
+            className={`chip ${mode === 'sku' ? 'active' : ''}`}
+            onClick={() => {
+              setMode('sku');
+              setQuery('');
+              setResult(null);
+              setError(null);
+              inputRef.current?.focus();
+            }}
+          >
+            <Tag size={12} />
+            Por SKU
+          </button>
+        </div>
+
         <div className="search-hero__bar">
           <Search className="search-hero__icon" size={19} strokeWidth={2.2} />
           <input
             id="order-search-input"
             ref={inputRef}
             type="text"
-            inputMode="numeric"
+            inputMode="text"
             autoComplete="off"
             spellCheck="false"
-            placeholder="Ej. 6310116494"
+            placeholder={mode === 'orden' ? 'Ej. 6310116494 o sg2609080001809' : 'Ej. SB5014548396 o 5014548396'}
             value={query}
-            onChange={(e) => setQuery(e.target.value.replace(/[^\d\s]/g, ''))}
+            onChange={(e) => setQuery(sanitize(e.target.value, mode))}
           />
           {query && (
             <button
@@ -281,8 +465,35 @@ function OrderSearch() {
             )}
           </button>
         </div>
+
+        <div className="search-hero__dates">
+          <DateRange
+            startId="search-start"
+            endId="search-end"
+            startDate={startDate}
+            endDate={endDate}
+            onStartChange={setStartDate}
+            onEndChange={setEndDate}
+          />
+          {rangoActivo && (
+            <button
+              type="button"
+              className="chip search-hero__dates-clear"
+              onClick={() => {
+                setStartDate('');
+                setEndDate('');
+              }}
+            >
+              <X size={12} /> Quitar rango
+            </button>
+          )}
+        </div>
+
         <p className="search-hero__hint">
-          Busca en los últimos 6 meses del flujo Decomm, todas las compañías.
+          {rangoActivo
+            ? 'Busca en el rango elegido (ambas fechas inclusive), todas las compañías del flujo Decomm.'
+            : 'Sin rango: busca en los últimos 6 meses del flujo Decomm, todas las compañías.'}
+          {mode === 'sku' ? ' El prefijo SB es opcional: se buscan ambas grafías.' : ''}
         </p>
 
         {recent.length > 0 && (
@@ -292,12 +503,13 @@ function OrderSearch() {
             </span>
             {recent.map((r) => (
               <button
-                key={r}
+                key={`${r.m}-${r.q}`}
                 type="button"
                 className="chip"
-                onClick={() => search(r)}
+                onClick={() => search(r.q, r.m)}
               >
-                {r}
+                {r.m === 'sku' ? <Tag size={11} /> : <Hash size={11} />}
+                {r.q}
               </button>
             ))}
           </div>
@@ -317,10 +529,17 @@ function OrderSearch() {
       {result && !result.found && (
         <div className="search-empty">
           <PackageSearch size={40} strokeWidth={1.6} />
-          <h3>No encontramos la orden {result.orderNumber}</h3>
+          <h3>
+            {result.mode === 'sku'
+              ? `Sin líneas para el SKU ${result.sku}`
+              : `No encontramos la orden ${result.orderNumber}`}
+          </h3>
           <p>
-            Revisa el número e intenta de nuevo. La búsqueda cubre los últimos
-            6 meses de <code>FAC_EDD_ORDERS_TRN</code>.
+            {rangoActivo
+              ? 'Prueba ampliando el rango de fechas.'
+              : 'La búsqueda cubre los últimos 6 meses de '}
+            {!rangoActivo && <code>FAC_EDD_ORDERS_TRN</code>}
+            {result.mode === 'sku' && !rangoActivo ? ' (con y sin prefijo SB).' : ''}
           </p>
         </div>
       )}
@@ -328,15 +547,25 @@ function OrderSearch() {
       {!result && !error && !searching && (
         <div className="search-empty search-empty--idle">
           <PackageSearch size={40} strokeWidth={1.6} />
-          <h3>Escribe un número de orden para empezar</h3>
+          <h3>
+            {mode === 'orden'
+              ? 'Escribe un número de orden para empezar'
+              : 'Escribe un SKU para empezar'}
+          </h3>
           <p>
-            Verás sus SKUs, la tienda que asignó cada línea, las fechas
-            estimadas y el tipo de entrega.
+            {mode === 'orden'
+              ? 'Verás sus SKUs, la tienda que asignó cada línea, las fechas estimadas y el tipo de entrega.'
+              : 'Verás en qué órdenes aparece, cuándo se compró, la tienda asignada y su estatus — acota con el rango de fechas si el SKU es muy vendido.'}
           </p>
         </div>
       )}
 
-      {/* ── Resultado ── */}
+      {/* ── Resultado por SKU ── */}
+      {result?.mode === 'sku' && result.found && (
+        <SkuResults result={result} onOpenOrder={openOrder} />
+      )}
+
+      {/* ── Resultado por orden ── */}
       {header && summary && (
         <article className="order-card">
           <header className="order-card__head">

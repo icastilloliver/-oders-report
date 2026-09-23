@@ -19,7 +19,7 @@ type OrdersRepository interface {
 	GetOrdersSummary(ctx context.Context, productType, fulfillmentType, isMarketplace, channel string, company, startDate, endDate string) ([]*model.OrdersSummary, error)
 	RecalculateOrders(ctx context.Context, startDate, endDate, company string) ([]*model.OrdersSummary, error)
 	GetDeliveryTypes(ctx context.Context, company, productType, startDate, endDate string) (*model.DeliveryTypesResult, error)
-	SearchOrder(ctx context.Context, orderNumber string) ([]*model.OrderSearchLine, error)
+	SearchOrder(ctx context.Context, p OrderSearchParams) (lines []*model.OrderSearchLine, truncated bool, err error)
 	GetOrdersCSV(ctx context.Context, params OrdersCSVParams) (*OrdersCSVStream, error)
 	GetErrorCodes(ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string) (*model.ErrorCodesResult, error)
 	BulkCheckOrders(ctx context.Context, candidates []string) ([]*model.BulkCheckDetailLine, error)
@@ -520,8 +520,49 @@ func (r orderSearchRow) toModel() *model.OrderSearchLine {
 // SearchOrder busca una orden/remisión por número en FAC_EDD_ORDERS_TRN
 // (Decomm), sobre los últimos 180 días, sin importar la compañía. Devuelve
 // todas las líneas (SKUs) con su tipo de entrega ya clasificado.
-func (o *Orders) SearchOrder(ctx context.Context, orderNumber string) ([]*model.OrderSearchLine, error) {
-	const query = `
+// OrderSearchParams: exactamente uno de OrderNumber/SkuVariants viene lleno
+// (lo garantiza el servicio). Start/End vacíos = últimos 180 días.
+type OrderSearchParams struct {
+	// OrderNumberVariants incluye el ID tal cual y su variante sin prefijo
+	// de letras (sg2609080001809 → 2609080001809), como el cotejo masivo.
+	OrderNumberVariants []string
+	SkuVariants         []string
+	Start               string
+	End                 string
+}
+
+// OrderSearchMaxRows acota la búsqueda por SKU (una orden tiene pocas líneas,
+// pero un SKU popular puede aparecer en miles).
+const OrderSearchMaxRows = 500
+
+func (o *Orders) SearchOrder(ctx context.Context, p OrderSearchParams) ([]*model.OrderSearchLine, bool, error) {
+	params := []bigquery.QueryParameter{}
+
+	// Ventana de tiempo: rango explícito (end exclusivo, como el resto de la
+	// app) o los últimos 180 días de siempre.
+	timeFilter := "ingestionTimestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 180 DAY)"
+	if p.Start != "" && p.End != "" {
+		timeFilter = `ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
+			AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')`
+		params = append(params,
+			bigquery.QueryParameter{Name: "start", Value: fmt.Sprintf("%s 00:00:00", p.Start)},
+			bigquery.QueryParameter{Name: "end", Value: fmt.Sprintf("%s 00:00:00", p.End)},
+		)
+	}
+
+	var matchFilter, orderBy, limit string
+	if len(p.OrderNumberVariants) > 0 {
+		matchFilter = "AND orderNumber IN UNNEST(@orderNumbers)"
+		orderBy = "ORDER BY edd1 NULLS LAST, sku"
+		params = append(params, bigquery.QueryParameter{Name: "orderNumbers", Value: p.OrderNumberVariants})
+	} else {
+		matchFilter = "AND TRIM(sku) IN UNNEST(@skus)"
+		orderBy = "ORDER BY createdAt DESC, orderNumber"
+		limit = fmt.Sprintf("LIMIT %d", OrderSearchMaxRows+1)
+		params = append(params, bigquery.QueryParameter{Name: "skus", Value: p.SkuVariants})
+	}
+
+	query := `
 		SELECT
 			orderNumber,
 			sku,
@@ -557,19 +598,18 @@ func (o *Orders) SearchOrder(ctx context.Context, orderNumber string) ([]*model.
 				ELSE 'estandar'
 			END AS tipoEntrega
 		FROM ` + "`crp-pro-dig-edd.mus_pro_digital_prd_tbls.FAC_EDD_ORDERS_TRN`" + `
-		WHERE ingestionTimestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 180 DAY)
-			AND orderNumber = @orderNumber
-		ORDER BY edd1 NULLS LAST, sku
+		WHERE ` + timeFilter + `
+			` + matchFilter + `
+		` + orderBy + `
+		` + limit + `
 	`
 
 	q := o.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{
-		{Name: "orderNumber", Value: orderNumber},
-	}
+	q.Parameters = params
 
 	it, err := q.Read(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("running order search query: %w", err)
+		return nil, false, fmt.Errorf("running order search query: %w", err)
 	}
 
 	lines := make([]*model.OrderSearchLine, 0)
@@ -580,10 +620,13 @@ func (o *Orders) SearchOrder(ctx context.Context, orderNumber string) ([]*model.
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("reading order search results: %w", err)
+			return nil, false, fmt.Errorf("reading order search results: %w", err)
 		}
 		lines = append(lines, row.toModel())
 	}
 
-	return lines, nil
+	if len(p.OrderNumberVariants) == 0 && len(lines) > OrderSearchMaxRows {
+		return lines[:OrderSearchMaxRows], true, nil
+	}
+	return lines, false, nil
 }

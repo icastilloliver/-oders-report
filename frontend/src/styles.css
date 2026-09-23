@@ -152,8 +152,9 @@ input {
 .container {
   flex: 1;
   min-width: 0;
-  max-width: 1400px;
-  padding: 32px 28px 48px;
+  /* Fluido: el contenido aprovecha todo el ancho disponible junto al
+     sidebar; el respiro lateral lo da solo este padding, no un max-width. */
+  padding: 32px 40px 48px;
   animation: fade-in var(--t-slow) ease-out;
 }
 
@@ -2821,3 +2822,75 @@ footer code {
   color: var(--text-3);
   font-size: 11.5px;
 }
+
+/* ── Fila de dos gráficas lado a lado (canal + errorCode) ── */
+.chart-row {
+  display: grid;
+  /* Dos columnas cuando caben (≥560px cada una); una sola en angosto */
+  grid-template-columns: repeat(auto-fit, minmax(560px, 1fr));
+  gap: 20px;
+  align-items: stretch;
+  margin-bottom: 24px;
+}
+.chart-row > .chart-card {
+  margin-bottom: 0;
+  min-width: 0; /* evita que el canvas de Chart.js desborde la columna */
+}
+
+/* ── Buscar Orden: modos, rango de fechas y resultados por SKU ── */
+.search-hero__modes {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.search-hero__dates {
+  /* Usa el DateRange estándar (.field + CalendarWidget del Historial) */
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.search-hero__dates .field { min-width: 200px; }
+.search-hero__dates-clear { margin-bottom: 8px; }
+.skures { margin-top: 4px; }
+.skures h2 code { font-family: var(--font-mono); font-size: 0.85em; }
+.skures__scroll {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+.skures__scroll table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.skures__scroll th {
+  text-align: left;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-strong);
+  padding: 10px 12px;
+  white-space: nowrap;
+}
+.skures__scroll td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.skures__scroll tr:last-child td { border-bottom: none; }
+.skures__scroll th.num,
+.skures__scroll td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.skures__link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--brand-primary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.skures__link:hover { opacity: 0.75; }

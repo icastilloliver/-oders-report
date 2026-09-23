@@ -19,6 +19,7 @@ import {
   Timer,
 } from 'lucide-react';
 import AtpLatencyChart from './AtpLatencyChart.jsx';
+import DateRange from './DateRange.jsx';
 
 /* ─────────────────── constantes ───────────────────
  * La validación consulta EPLInventoryAvailabilityWebService en el OMS de
@@ -420,31 +421,14 @@ function AtpDecomm() {
         </div>
 
         <div className="filters">
-          <div className="field">
-            <label htmlFor="atp-start">Desde</label>
-            <div className="input-wrap">
-              <Calendar className="input-wrap__icon" size={16} />
-              <input
-                id="atp-start"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="field">
-            <label htmlFor="atp-end">Hasta</label>
-            <div className="input-wrap">
-              <Calendar className="input-wrap__icon" size={16} />
-              <input
-                id="atp-end"
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-            </div>
-          </div>
+          <DateRange
+            startId="atp-start"
+            endId="atp-end"
+            startDate={startDate}
+            endDate={endDate}
+            onStartChange={setStartDate}
+            onEndChange={setEndDate}
+          />
 
           <div className="field" style={{ maxWidth: '160px' }}>
             <label htmlFor="atp-timeout" title={`Entre ${TIMEOUT_MIN_S} y ${TIMEOUT_MAX_S} segundos`}>
