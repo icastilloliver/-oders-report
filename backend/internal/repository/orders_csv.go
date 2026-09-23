@@ -38,6 +38,9 @@ type OrdersCSVParams struct {
 	FulfillmentType string
 	MarketPlace     string
 	Channel         string
+	// HourStart/HourEnd filtran por hora del día (CDMX); -1 = sin filtro.
+	HourStart int
+	HourEnd   int
 }
 
 // OrdersCSVPageSize fija el tamaño de página del RowIterator para que los
@@ -247,6 +250,9 @@ func buildOrdersCSVQuery(p OrdersCSVParams) (string, []bigquery.QueryParameter, 
 			params = append(params, bigquery.QueryParameter{Name: "channel", Value: p.Channel})
 		}
 
+		var filterHour string
+		filterHour, params = hourFilter(p.HourStart, p.HourEnd, params)
+
 		var filterMarketPlace string
 		if p.MarketPlace != "" {
 			filterMarketPlace = "AND marketPlace = @marketPlace"
@@ -271,11 +277,12 @@ func buildOrdersCSVQuery(p OrdersCSVParams) (string, []bigquery.QueryParameter, 
 					%s
 					%s
 					%s
+					%s
 					AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
 					AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
 			)
 			SELECT * FROM base WHERE clasificacion IN ('Error', 'Plan B')
-		`, filterProductType, filterFulfillment, filterMarketPlace, filterChannel)
+		`, filterProductType, filterFulfillment, filterMarketPlace, filterChannel, filterHour)
 
 		return query, params, "", nil
 

@@ -2894,3 +2894,18 @@ footer code {
   text-underline-offset: 3px;
 }
 .skures__link:hover { opacity: 0.75; }
+
+/* ── Filtro por hora del día (CDMX) ── */
+.hour-select {
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--surface);
+  cursor: pointer;
+}
+.hour-select:hover { border-color: var(--border-strong); }
+.hour-select:disabled { opacity: 0.5; cursor: not-allowed; }

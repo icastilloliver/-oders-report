@@ -154,6 +154,7 @@ type errorTrendCodeBQ struct {
 func (o *Orders) GetErrorTrend(
 	ctx context.Context,
 	company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string,
+	hourStart, hourEnd int,
 ) (days []*model.ErrorTrendDay, codes []*model.ErrorTrendCode, err error) {
 	params := []bigquery.QueryParameter{
 		{Name: "company", Value: company},
@@ -181,6 +182,8 @@ func (o *Orders) GetErrorTrend(
 		filterChannel = "AND UPPER(TRIM(channel)) = @channel"
 		params = append(params, bigquery.QueryParameter{Name: "channel", Value: channel})
 	}
+	var filterHour string
+	filterHour, params = hourFilter(hourStart, hourEnd, params)
 
 	baseCTE := fmt.Sprintf(`
 		WITH base AS (
@@ -194,10 +197,11 @@ func (o *Orders) GetErrorTrend(
 				%s
 				%s
 				%s
+				%s
 				AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
 				AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
 		)
-	`, errorCodeNormSQL, clasificacionSQL, filterProductType, filterFulfillment, filterMarketplace, filterChannel)
+	`, errorCodeNormSQL, clasificacionSQL, filterProductType, filterFulfillment, filterMarketplace, filterChannel, filterHour)
 
 	queryDays := baseCTE + `
 		SELECT
@@ -290,6 +294,7 @@ type fulfillmentCodeBQ struct {
 func (o *Orders) GetErrorCodesFulfillment(
 	ctx context.Context,
 	company, marketPlace, channel, startDate, endDate string,
+	hourStart, hourEnd int,
 ) (map[string]*model.FulfillmentSegment, error) {
 	params := []bigquery.QueryParameter{
 		{Name: "company", Value: company},
@@ -307,6 +312,8 @@ func (o *Orders) GetErrorCodesFulfillment(
 		filterChannel = "AND UPPER(TRIM(channel)) = @channel"
 		params = append(params, bigquery.QueryParameter{Name: "channel", Value: channel})
 	}
+	var filterHour string
+	filterHour, params = hourFilter(hourStart, hourEnd, params)
 
 	baseCTE := fmt.Sprintf(`
 		WITH base AS (
@@ -319,10 +326,11 @@ func (o *Orders) GetErrorCodesFulfillment(
 			WHERE company = @company
 				%s
 				%s
+				%s
 				AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
 				AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
 		)
-	`, fulfillmentBucketSQL, errorCodeNormSQL, clasificacionSQL, filterMarketplace, filterChannel)
+	`, fulfillmentBucketSQL, errorCodeNormSQL, clasificacionSQL, filterMarketplace, filterChannel, filterHour)
 
 	segments := map[string]*model.FulfillmentSegment{
 		"domicilio": {Codes: []*model.ErrorCodeCount{}},

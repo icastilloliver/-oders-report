@@ -130,10 +130,12 @@ func (h *OrdersHandler) handleErrorTrend(w http.ResponseWriter, r *http.Request)
 	fulfillmentType := r.URL.Query().Get("fulfillmentType")
 	marketPlace := r.URL.Query().Get("marketPlace")
 	channel := r.URL.Query().Get("channel")
+	hourStart := r.URL.Query().Get("hourStart")
+	hourEnd := r.URL.Query().Get("hourEnd")
 	startDate := r.URL.Query().Get("start")
 	endDate := r.URL.Query().Get("end")
 
-	days, codes, err := h.service.GetErrorTrend(r.Context(), company, productType, fulfillmentType, marketPlace, channel, startDate, endDate)
+	days, codes, err := h.service.GetErrorTrend(r.Context(), company, productType, fulfillmentType, marketPlace, channel, startDate, endDate, hourStart, hourEnd)
 	if err != nil {
 		utils.Logging("ERROR", "Error getting error trend", "", map[string]any{
 			"query": r.URL.Query(),
@@ -143,7 +145,8 @@ func (h *OrdersHandler) handleErrorTrend(w http.ResponseWriter, r *http.Request)
 		case errors.Is(err, services.ErrInvalidDateFormat),
 			errors.Is(err, services.ErrInvalidFulfillmentType),
 			errors.Is(err, services.ErrInvalidMarketPlace),
-			errors.Is(err, services.ErrInvalidChannel):
+			errors.Is(err, services.ErrInvalidChannel),
+			errors.Is(err, services.ErrInvalidHourRange):
 			writeJSONError(w, http.StatusBadRequest, err)
 		default:
 			writeJSONError(w, http.StatusInternalServerError, err)
@@ -166,10 +169,12 @@ func (h *OrdersHandler) handleErrorCodesFulfillment(w http.ResponseWriter, r *ht
 	company := r.URL.Query().Get("company")
 	marketPlace := r.URL.Query().Get("marketPlace")
 	channel := r.URL.Query().Get("channel")
+	hourStart := r.URL.Query().Get("hourStart")
+	hourEnd := r.URL.Query().Get("hourEnd")
 	startDate := r.URL.Query().Get("start")
 	endDate := r.URL.Query().Get("end")
 
-	segments, err := h.service.GetErrorCodesFulfillment(r.Context(), company, marketPlace, channel, startDate, endDate)
+	segments, err := h.service.GetErrorCodesFulfillment(r.Context(), company, marketPlace, channel, startDate, endDate, hourStart, hourEnd)
 	if err != nil {
 		utils.Logging("ERROR", "Error getting error codes fulfillment", "", map[string]any{
 			"query": r.URL.Query(),
@@ -178,7 +183,8 @@ func (h *OrdersHandler) handleErrorCodesFulfillment(w http.ResponseWriter, r *ht
 		switch {
 		case errors.Is(err, services.ErrInvalidDateFormat),
 			errors.Is(err, services.ErrInvalidMarketPlace),
-			errors.Is(err, services.ErrInvalidChannel):
+			errors.Is(err, services.ErrInvalidChannel),
+			errors.Is(err, services.ErrInvalidHourRange):
 			writeJSONError(w, http.StatusBadRequest, err)
 		default:
 			writeJSONError(w, http.StatusInternalServerError, err)
@@ -206,10 +212,12 @@ func (h *OrdersHandler) HandlerChannelBreakdown(w http.ResponseWriter, r *http.R
 	productType := r.URL.Query().Get("productType")
 	fulfillmentType := r.URL.Query().Get("fulfillmentType")
 	marketPlace := r.URL.Query().Get("marketPlace")
+	hourStart := r.URL.Query().Get("hourStart")
+	hourEnd := r.URL.Query().Get("hourEnd")
 	startDate := r.URL.Query().Get("start")
 	endDate := r.URL.Query().Get("end")
 
-	data, err := h.service.GetChannelBreakdown(r.Context(), company, productType, fulfillmentType, marketPlace, startDate, endDate)
+	data, err := h.service.GetChannelBreakdown(r.Context(), company, productType, fulfillmentType, marketPlace, startDate, endDate, hourStart, hourEnd)
 	if err != nil {
 		utils.Logging("ERROR", "Error getting channel breakdown", "", map[string]any{
 			"query": r.URL.Query(),
@@ -218,7 +226,8 @@ func (h *OrdersHandler) HandlerChannelBreakdown(w http.ResponseWriter, r *http.R
 		switch {
 		case errors.Is(err, services.ErrInvalidDateFormat),
 			errors.Is(err, services.ErrInvalidFulfillmentType),
-			errors.Is(err, services.ErrInvalidMarketPlace):
+			errors.Is(err, services.ErrInvalidMarketPlace),
+			errors.Is(err, services.ErrInvalidHourRange):
 			writeJSONError(w, http.StatusBadRequest, err)
 		default:
 			writeJSONError(w, http.StatusInternalServerError, err)

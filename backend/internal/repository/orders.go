@@ -16,18 +16,18 @@ import (
 )
 
 type OrdersRepository interface {
-	GetOrdersSummary(ctx context.Context, productType, fulfillmentType, isMarketplace, channel string, company, startDate, endDate string) ([]*model.OrdersSummary, error)
+	GetOrdersSummary(ctx context.Context, productType, fulfillmentType, isMarketplace, channel string, hourStart, hourEnd int, company, startDate, endDate string) ([]*model.OrdersSummary, error)
 	RecalculateOrders(ctx context.Context, startDate, endDate, company string) ([]*model.OrdersSummary, error)
 	GetDeliveryTypes(ctx context.Context, company, productType, startDate, endDate string) (*model.DeliveryTypesResult, error)
 	SearchOrder(ctx context.Context, p OrderSearchParams) (lines []*model.OrderSearchLine, truncated bool, err error)
 	GetOrdersCSV(ctx context.Context, params OrdersCSVParams) (*OrdersCSVStream, error)
-	GetErrorCodes(ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string) (*model.ErrorCodesResult, error)
+	GetErrorCodes(ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string, hourStart, hourEnd int) (*model.ErrorCodesResult, error)
 	BulkCheckOrders(ctx context.Context, candidates []string) ([]*model.BulkCheckDetailLine, error)
 	GetErrorCodesCSV(ctx context.Context, params ErrorCodesCSVParams) (header []string, rows [][]string, truncated bool, err error)
 	GetAtpDecommRows(ctx context.Context, company, fulfillmentType, startDate, endDate string) (rows []*model.AtpDecommRow, truncated bool, err error)
-	GetErrorTrend(ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string) (days []*model.ErrorTrendDay, codes []*model.ErrorTrendCode, err error)
-	GetErrorCodesFulfillment(ctx context.Context, company, marketPlace, channel, startDate, endDate string) (map[string]*model.FulfillmentSegment, error)
-	GetChannelBreakdown(ctx context.Context, company, productType, fulfillmentType, marketPlace, startDate, endDate string) ([]*model.ChannelCount, error)
+	GetErrorTrend(ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string, hourStart, hourEnd int) (days []*model.ErrorTrendDay, codes []*model.ErrorTrendCode, err error)
+	GetErrorCodesFulfillment(ctx context.Context, company, marketPlace, channel, startDate, endDate string, hourStart, hourEnd int) (map[string]*model.FulfillmentSegment, error)
+	GetChannelBreakdown(ctx context.Context, company, productType, fulfillmentType, marketPlace, startDate, endDate string, hourStart, hourEnd int) ([]*model.ChannelCount, error)
 }
 
 // productTypeVariants espeja al helper homónimo de server.js: 'BIG TICKET'/'BT'
@@ -45,6 +45,25 @@ func productTypeVariants(productType string) []string {
 	}
 }
 
+// hourFilter arma el filtro por hora del día en zona America/Mexico_City y
+// agrega sus parámetros. hourStart/hourEnd en -1 = sin filtro. Soporta
+// rangos que cruzan medianoche (22 → 03).
+func hourFilter(hourStart, hourEnd int, params []bigquery.QueryParameter) (string, []bigquery.QueryParameter) {
+	if hourStart < 0 || hourEnd < 0 {
+		return "", params
+	}
+	const h = "EXTRACT(HOUR FROM ingestionTimestamp AT TIME ZONE 'America/Mexico_City')"
+	clause := `AND (
+		(@hourStart <= @hourEnd AND ` + h + ` BETWEEN @hourStart AND @hourEnd)
+		OR (@hourStart > @hourEnd AND (` + h + ` >= @hourStart OR ` + h + ` <= @hourEnd))
+	)`
+	params = append(params,
+		bigquery.QueryParameter{Name: "hourStart", Value: hourStart},
+		bigquery.QueryParameter{Name: "hourEnd", Value: hourEnd},
+	)
+	return clause, params
+}
+
 type Orders struct {
 	client *bigquery.Client
 }
@@ -58,6 +77,7 @@ func NewOrdersRepository(client *bigquery.Client) OrdersRepository {
 func (o *Orders) GetOrdersSummary(
 	ctx context.Context,
 	productType, fulfillmentType, isMarketplace, channel string,
+	hourStart, hourEnd int,
 	company, startDate, endDate string,
 ) ([]*model.OrdersSummary, error) {
 	loc, err := time.LoadLocation("America/Mexico_City")
@@ -108,6 +128,12 @@ func (o *Orders) GetOrdersSummary(
 		}
 		filters.WriteString(" AND marketPlace = @marketPlace")
 		params = append(params, bigquery.QueryParameter{Name: "marketPlace", Value: v})
+	}
+
+	var hourClause string
+	hourClause, params = hourFilter(hourStart, hourEnd, params)
+	if hourClause != "" {
+		filters.WriteString(" " + hourClause)
 	}
 
 	const ordersTableName = "`crp-pro-dig-edd.mus_pro_digital_prd_tbls.FAC_EDD_ORDERS_TRN`"

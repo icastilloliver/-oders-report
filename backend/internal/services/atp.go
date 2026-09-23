@@ -41,6 +41,7 @@ var (
 	ErrAtpMissingAuth  = errors.New("falta OMS_ATP_AUTH en backend/.env (credencial Basic del OMS de Suburbia)")
 	ErrInvalidCompany  = errors.New("company inválida")
 	ErrInvalidChannel  = errors.New("channel inválido")
+	ErrInvalidHourRange = errors.New("rango de hora inválido (hourStart y hourEnd en pareja, 0-23)")
 )
 
 var (
@@ -337,9 +338,13 @@ func (o *OrdersService) GetAtpDecommRows(
 
 // GetErrorTrend valida filtros y regresa la serie diaria de errores.
 func (o *OrdersService) GetErrorTrend(
-	ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string,
+	ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate, hourStart, hourEnd string,
 ) (days []*model.ErrorTrendDay, codes []*model.ErrorTrendCode, err error) {
 	channel, err = normalizeChannel(channel)
+	if err != nil {
+		return nil, nil, err
+	}
+	hs, he, err := parseHourRange(hourStart, hourEnd)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -361,15 +366,19 @@ func (o *OrdersService) GetErrorTrend(
 	if marketPlace != "" && marketPlace != "true" && marketPlace != "false" {
 		return nil, nil, ErrInvalidMarketPlace
 	}
-	return o.order.GetErrorTrend(ctx, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate)
+	return o.order.GetErrorTrend(ctx, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate, hs, he)
 }
 
 // GetErrorCodesFulfillment valida filtros y regresa la comparativa por
 // tipo de surtido (LP Decomm).
 func (o *OrdersService) GetErrorCodesFulfillment(
-	ctx context.Context, company, marketPlace, channel, startDate, endDate string,
+	ctx context.Context, company, marketPlace, channel, startDate, endDate, hourStart, hourEnd string,
 ) (map[string]*model.FulfillmentSegment, error) {
 	channel, err := normalizeChannel(channel)
+	if err != nil {
+		return nil, err
+	}
+	hs, he, err := parseHourRange(hourStart, hourEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -388,7 +397,25 @@ func (o *OrdersService) GetErrorCodesFulfillment(
 	if marketPlace != "" && marketPlace != "true" && marketPlace != "false" {
 		return nil, ErrInvalidMarketPlace
 	}
-	return o.order.GetErrorCodesFulfillment(ctx, company, marketPlace, channel, startDate, endDate)
+	return o.order.GetErrorCodesFulfillment(ctx, company, marketPlace, channel, startDate, endDate, hs, he)
+}
+
+// parseHourRange valida el filtro por hora del día (CDMX). Vacíos ambos =
+// sin filtro (-1, -1); si viene uno solo o algo fuera de 0-23, error.
+func parseHourRange(rawStart, rawEnd string) (int, int, error) {
+	rawStart, rawEnd = strings.TrimSpace(rawStart), strings.TrimSpace(rawEnd)
+	if rawStart == "" && rawEnd == "" {
+		return -1, -1, nil
+	}
+	if rawStart == "" || rawEnd == "" {
+		return 0, 0, ErrInvalidHourRange
+	}
+	hs, err1 := strconv.Atoi(rawStart)
+	he, err2 := strconv.Atoi(rawEnd)
+	if err1 != nil || err2 != nil || hs < 0 || hs > 23 || he < 0 || he > 23 {
+		return 0, 0, ErrInvalidHourRange
+	}
+	return hs, he, nil
 }
 
 // normalizeChannel valida el filtro de canal y lo regresa en mayúsculas
@@ -421,8 +448,12 @@ func validateRealDates(dates ...string) error {
 // GetChannelBreakdown valida filtros y regresa el reparto por canal del
 // rango (misma clasificación y filtros que el resto de la vista).
 func (o *OrdersService) GetChannelBreakdown(
-	ctx context.Context, company, productType, fulfillmentType, marketPlace, startDate, endDate string,
+	ctx context.Context, company, productType, fulfillmentType, marketPlace, startDate, endDate, hourStart, hourEnd string,
 ) ([]*model.ChannelCount, error) {
+	hs, he, err := parseHourRange(hourStart, hourEnd)
+	if err != nil {
+		return nil, err
+	}
 	if company == "" {
 		company = "LP"
 	}
@@ -441,5 +472,5 @@ func (o *OrdersService) GetChannelBreakdown(
 	if marketPlace != "" && marketPlace != "true" && marketPlace != "false" {
 		return nil, ErrInvalidMarketPlace
 	}
-	return o.order.GetChannelBreakdown(ctx, company, productType, fulfillmentType, marketPlace, startDate, endDate)
+	return o.order.GetChannelBreakdown(ctx, company, productType, fulfillmentType, marketPlace, startDate, endDate, hs, he)
 }

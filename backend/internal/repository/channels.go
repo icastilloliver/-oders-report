@@ -23,6 +23,7 @@ type channelCountBQ struct {
 func (o *Orders) GetChannelBreakdown(
 	ctx context.Context,
 	company, productType, fulfillmentType, marketPlace, startDate, endDate string,
+	hourStart, hourEnd int,
 ) ([]*model.ChannelCount, error) {
 	params := []bigquery.QueryParameter{
 		{Name: "company", Value: company},
@@ -46,6 +47,9 @@ func (o *Orders) GetChannelBreakdown(
 		params = append(params, bigquery.QueryParameter{Name: "marketPlace", Value: marketPlace == "true"})
 	}
 
+	var filterHour string
+	filterHour, params = hourFilter(hourStart, hourEnd, params)
+
 	query := fmt.Sprintf(`
 		WITH base AS (
 			SELECT
@@ -53,6 +57,7 @@ func (o *Orders) GetChannelBreakdown(
 				%s AS clasificacion
 			FROM `+"`crp-pro-dig-edd.mus_pro_digital_prd_tbls.FAC_EDD_ORDERS_TRN`"+`
 			WHERE company = @company
+				%s
 				%s
 				%s
 				%s
@@ -66,7 +71,7 @@ func (o *Orders) GetChannelBreakdown(
 		FROM base
 		GROUP BY channel
 		ORDER BY total DESC
-	`, clasificacionSQL, filterProductType, filterFulfillment, filterMarketplace)
+	`, clasificacionSQL, filterProductType, filterFulfillment, filterMarketplace, filterHour)
 
 	q := o.client.Query(query)
 	q.Parameters = params

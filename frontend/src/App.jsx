@@ -200,6 +200,10 @@ function App() {
   const [marketplace, setMarketplace] = useState('false');
   // Filtro principal por canal de venta: 'all' | APP | WEB | WAP | CSC
   const [channel, setChannel] = useState('all');
+  // Filtro por hora del día en CDMX ('' = sin filtro). Se manda en pareja:
+  // si solo se elige una, la otra se completa con 0 / 23.
+  const [hourStart, setHourStart] = useState('');
+  const [hourEnd, setHourEnd] = useState('');
   // Mostrar/ocultar la serie % Error en la gráfica (solo tab SBB Decomm)
   const [showErrorSeries, setShowErrorSeries] = useState(true);
   const [activeQuick, setActiveQuick] = useState(null);
@@ -271,6 +275,14 @@ function App() {
         prevParams += `&channel=${channel}`;
       }
 
+      // Hora del día (CDMX) · aplica sobre ingestionTimestamp del decomm
+      if ((hourStart !== '' || hourEnd !== '') && !isRecalc) {
+        const hs = hourStart === '' ? '0' : hourStart;
+        const he = hourEnd === '' ? '23' : hourEnd;
+        queryParams += `&hourStart=${hs}&hourEnd=${he}`;
+        prevParams += `&hourStart=${hs}&hourEnd=${he}`;
+      }
+
       const [resCurr, resPrev] = await Promise.all([
         fetch(`${endpoint}${queryParams}`),
         fetch(`${endpoint}${prevParams}`).catch(() => null),
@@ -304,6 +316,10 @@ function App() {
           if (fulfillment !== 'all') p.set('fulfillmentType', fulfillment);
           if (company === 'LP_DECOMM' && marketplace !== 'all') p.set('marketPlace', marketplace);
           if (channel !== 'all') p.set('channel', channel);
+          if (hourStart !== '' || hourEnd !== '') {
+            p.set('hourStart', hourStart === '' ? '0' : hourStart);
+            p.set('hourEnd', hourEnd === '' ? '23' : hourEnd);
+          }
           const errorCodesQuery = p.toString();
 
           // El pastel de canales COMPARA canales: ignora el filtro de canal
@@ -344,6 +360,10 @@ function App() {
           });
           if (marketplace !== 'all') p.set('marketPlace', marketplace);
           if (channel !== 'all') p.set('channel', channel);
+          if (hourStart !== '' || hourEnd !== '') {
+            p.set('hourStart', hourStart === '' ? '0' : hourStart);
+            p.set('hourEnd', hourEnd === '' ? '23' : hourEnd);
+          }
           const resSplit = await fetch(`/api/error-codes-fulfillment?${p}`);
           setFsplit(resSplit.ok ? { ...(await resSplit.json()), query: p.toString() } : null);
         } catch {
@@ -357,7 +377,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, company, view, fulfillment, marketplace, channel]);
+  }, [startDate, endDate, company, view, fulfillment, marketplace, channel, hourStart, hourEnd]);
 
   // Usa fetch (y no window.open) para no abrir una pestaña en blanco: así se
   // puede mostrar el spinner en el botón y quedarse en la misma página.
@@ -381,6 +401,9 @@ function App() {
     }
     if (channel !== 'all' && !company.includes('RECALC')) {
       url += `&channel=${channel}`;
+    }
+    if ((hourStart !== '' || hourEnd !== '') && !company.includes('RECALC')) {
+      url += `&hourStart=${hourStart === '' ? '0' : hourStart}&hourEnd=${hourEnd === '' ? '23' : hourEnd}`;
     }
 
     setCsvExporting(true);
@@ -420,7 +443,7 @@ function App() {
     // --brand-primary por JS: queda fijo en :root (styles.css).
     document.documentElement.setAttribute('data-company', company);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [company, view, fulfillment, marketplace, channel]);
+  }, [company, view, fulfillment, marketplace, channel, hourStart, hourEnd]);
 
   /* Reloj del header: un único intervalo durante toda la vida del componente */
   useEffect(() => {
@@ -776,6 +799,59 @@ function App() {
             )}
           </div>
         </div>
+
+        {/* Filtro por hora del día (CDMX) · abajo de la fecha, mismo patrón
+            de fila que Surtido/Producto/Canal */}
+        {view === 'planes' && (
+          <div className="quick-ranges quick-ranges--hour" role="group" aria-label="Hora del día">
+            <span className="quick-ranges__label">
+              <Clock size={12} /> Hora (CDMX)
+            </span>
+            <select
+              className="hour-select"
+              aria-label="Hora desde"
+              value={hourStart}
+              onChange={(e) => setHourStart(e.target.value)}
+              disabled={company.includes('RECALC')}
+            >
+              <option value="">Desde 00:00</option>
+              {Array.from({ length: 24 }, (_, h) => String(h)).map((h) => (
+                <option key={h} value={h}>{`${h.padStart(2, '0')}:00`}</option>
+              ))}
+            </select>
+            <span className="quick-ranges__note">→</span>
+            <select
+              className="hour-select"
+              aria-label="Hora hasta"
+              value={hourEnd}
+              onChange={(e) => setHourEnd(e.target.value)}
+              disabled={company.includes('RECALC')}
+            >
+              <option value="">Hasta 23:59</option>
+              {Array.from({ length: 24 }, (_, h) => String(h)).map((h) => (
+                <option key={h} value={h}>{`${h.padStart(2, '0')}:59`}</option>
+              ))}
+            </select>
+            {(hourStart !== '' || hourEnd !== '') && (
+              <button
+                type="button"
+                className="chip"
+                onClick={() => {
+                  setHourStart('');
+                  setHourEnd('');
+                }}
+              >
+                Todo el día
+              </button>
+            )}
+            <span className="quick-ranges__note">
+              {company.includes('RECALC')
+                ? 'No aplica al recalculo'
+                : 'hora de ingesta en America/Mexico_City · admite rangos que cruzan medianoche (22 → 03)'}
+            </span>
+          </div>
+        )}
+
         {view === 'planes' && (
           <p className="csv-export-hint">
             <Info size={13} strokeWidth={2.2} />

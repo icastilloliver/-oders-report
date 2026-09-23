@@ -107,6 +107,7 @@ func NewOrdersService(o repository.OrdersRepository) *OrdersService {
 
 func (o *OrdersService) GetOrdersSummary(
 	productType, fulfillmentType, isMarketplace, channel string,
+	hourStart, hourEnd string,
 	company, startDate, endDate string,
 ) ([]*model.OrdersSummary, error) {
 
@@ -119,12 +120,19 @@ func (o *OrdersService) GetOrdersSummary(
 		return nil, err
 	}
 
+	hs, he, err := parseHourRange(hourStart, hourEnd)
+	if err != nil {
+		return nil, err
+	}
+
 	return o.order.GetOrdersSummary(
 		context.Background(),
 		productType,
 		fulfillmentType,
 		isMarketplace,
 		channel,
+		hs,
+		he,
 		company,
 		startDate,
 		endDate,
@@ -176,9 +184,14 @@ func (o *OrdersService) GetDeliveryTypes(
 // GetErrorCodes valida los filtros y regresa el desglose por errorCode de
 // los registros clasificados como Error en el rango.
 func (o *OrdersService) GetErrorCodes(
-	company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string,
+	company, productType, fulfillmentType, marketPlace, channel, startDate, endDate, hourStart, hourEnd string,
 ) (*model.ErrorCodesResult, error) {
 	channel, err := normalizeChannel(channel)
+	if err != nil {
+		return nil, err
+	}
+
+	hs, he, err := parseHourRange(hourStart, hourEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -216,6 +229,8 @@ func (o *OrdersService) GetErrorCodes(
 		channel,
 		startDate,
 		endDate,
+		hs,
+		he,
 	)
 }
 
@@ -288,9 +303,13 @@ func (o *OrdersService) SearchOrder(orderNumber, sku, start, end string) ([]*mod
 // lectura si el cliente corta la descarga a medias.
 func (o *OrdersService) ExportOrdersCSV(
 	ctx context.Context,
-	start, end, company, csvType, productType, fulfillmentType, marketPlace, channel string,
+	start, end, company, csvType, productType, fulfillmentType, marketPlace, channel, hourStart, hourEnd string,
 ) (stream *repository.OrdersCSVStream, filename string, err error) {
 	channel, err = normalizeChannel(channel)
+	if err != nil {
+		return nil, "", err
+	}
+	hs, he, err := parseHourRange(hourStart, hourEnd)
 	if err != nil {
 		return nil, "", err
 	}
@@ -323,6 +342,8 @@ func (o *OrdersService) ExportOrdersCSV(
 		FulfillmentType: fulfillmentType,
 		MarketPlace:     marketPlace,
 		Channel:         channel,
+		HourStart:       hs,
+		HourEnd:         he,
 	})
 	if err != nil {
 		return nil, "", err
@@ -497,9 +518,13 @@ func (o *OrdersService) BulkCheckOrders(ctx context.Context, raw []string) (*mod
 // sugerido y si el resultado se truncó por el tope de filas.
 func (o *OrdersService) GetErrorCodesCSV(
 	ctx context.Context,
-	start, end, company, productType, fulfillmentType, marketPlace, channel, rawCodes, label string,
+	start, end, company, productType, fulfillmentType, marketPlace, channel, hourStart, hourEnd, rawCodes, label string,
 ) (header []string, rows [][]string, truncated bool, filename string, err error) {
 	channel, err = normalizeChannel(channel)
+	if err != nil {
+		return nil, nil, false, "", err
+	}
+	hs, he, err := parseHourRange(hourStart, hourEnd)
 	if err != nil {
 		return nil, nil, false, "", err
 	}
@@ -550,6 +575,8 @@ func (o *OrdersService) GetErrorCodesCSV(
 		FulfillmentType: fulfillmentType,
 		MarketPlace:     marketPlace,
 		Channel:         channel,
+		HourStart:       hs,
+		HourEnd:         he,
 		Codes:           codes,
 	})
 	if err != nil {

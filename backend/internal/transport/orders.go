@@ -59,11 +59,13 @@ func (h *OrdersHandler) handleGetOrdersSummary(w http.ResponseWriter, r *http.Re
 	fulfillmentType := r.URL.Query().Get("fulfillmentType")
 	marketplace := r.URL.Query().Get("marketPlace")
 	channel := r.URL.Query().Get("channel")
+	hourStart := r.URL.Query().Get("hourStart")
+	hourEnd := r.URL.Query().Get("hourEnd")
 	company := r.URL.Query().Get("company")
 	startDate := r.URL.Query().Get("start")
 	endDate := r.URL.Query().Get("end")
 
-	summary, err := h.service.GetOrdersSummary(productType, fulfillmentType, marketplace, channel, company, startDate, endDate)
+	summary, err := h.service.GetOrdersSummary(productType, fulfillmentType, marketplace, channel, hourStart, hourEnd, company, startDate, endDate)
 	if err != nil {
 		utils.Logging("ERROR", "Error getting orders summary", "", map[string]any{
 			"query": r.URL.Query(),
@@ -179,10 +181,12 @@ func (h *OrdersHandler) handleGetErrorCodes(w http.ResponseWriter, r *http.Reque
 	fulfillmentType := r.URL.Query().Get("fulfillmentType")
 	marketPlace := r.URL.Query().Get("marketPlace")
 	channel := r.URL.Query().Get("channel")
+	hourStart := r.URL.Query().Get("hourStart")
+	hourEnd := r.URL.Query().Get("hourEnd")
 	startDate := r.URL.Query().Get("start")
 	endDate := r.URL.Query().Get("end")
 
-	result, err := h.service.GetErrorCodes(company, productType, fulfillmentType, marketPlace, channel, startDate, endDate)
+	result, err := h.service.GetErrorCodes(company, productType, fulfillmentType, marketPlace, channel, startDate, endDate, hourStart, hourEnd)
 	if err != nil {
 		utils.Logging("ERROR", "Error getting error codes", "", map[string]any{
 			"query": r.URL.Query(),
@@ -192,7 +196,8 @@ func (h *OrdersHandler) handleGetErrorCodes(w http.ResponseWriter, r *http.Reque
 		if errors.Is(err, services.ErrInvalidDateFormat) ||
 			errors.Is(err, services.ErrInvalidFulfillmentType) ||
 			errors.Is(err, services.ErrInvalidMarketPlace) ||
-			errors.Is(err, services.ErrInvalidChannel) {
+			errors.Is(err, services.ErrInvalidChannel) ||
+			errors.Is(err, services.ErrInvalidHourRange) {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"error": err.Error(),
@@ -275,8 +280,10 @@ func (h *OrdersHandler) handleOrdersCSV(w http.ResponseWriter, r *http.Request) 
 	fulfillmentType := r.URL.Query().Get("fulfillmentType")
 	marketPlace := r.URL.Query().Get("marketPlace")
 	channel := r.URL.Query().Get("channel")
+	hourStart := r.URL.Query().Get("hourStart")
+	hourEnd := r.URL.Query().Get("hourEnd")
 
-	stream, filename, err := h.service.ExportOrdersCSV(r.Context(), start, end, company, csvType, productType, fulfillmentType, marketPlace, channel)
+	stream, filename, err := h.service.ExportOrdersCSV(r.Context(), start, end, company, csvType, productType, fulfillmentType, marketPlace, channel, hourStart, hourEnd)
 	if err != nil {
 		utils.Logging("ERROR", "Error exporting orders csv", "", map[string]any{
 			"query": r.URL.Query(),
@@ -287,6 +294,7 @@ func (h *OrdersHandler) handleOrdersCSV(w http.ResponseWriter, r *http.Request) 
 			errors.Is(err, services.ErrInvalidFulfillmentType),
 			errors.Is(err, services.ErrInvalidMarketPlace),
 			errors.Is(err, services.ErrInvalidChannel),
+			errors.Is(err, services.ErrInvalidHourRange),
 			errors.Is(err, services.ErrInvalidCSVType):
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
@@ -423,11 +431,13 @@ func (h *OrdersHandler) handleGetErrorCodesCSV(w http.ResponseWriter, r *http.Re
 	fulfillmentType := r.URL.Query().Get("fulfillmentType")
 	marketPlace := r.URL.Query().Get("marketPlace")
 	channel := r.URL.Query().Get("channel")
+	hourStart := r.URL.Query().Get("hourStart")
+	hourEnd := r.URL.Query().Get("hourEnd")
 	codes := r.URL.Query().Get("codes")
 	label := r.URL.Query().Get("label")
 
 	header, rows, truncated, filename, err := h.service.GetErrorCodesCSV(
-		r.Context(), start, end, company, productType, fulfillmentType, marketPlace, channel, codes, label,
+		r.Context(), start, end, company, productType, fulfillmentType, marketPlace, channel, hourStart, hourEnd, codes, label,
 	)
 	if err != nil {
 		utils.Logging("ERROR", "Error exporting error codes csv", "", map[string]any{
@@ -439,6 +449,7 @@ func (h *OrdersHandler) handleGetErrorCodesCSV(w http.ResponseWriter, r *http.Re
 			errors.Is(err, services.ErrInvalidFulfillmentType),
 			errors.Is(err, services.ErrInvalidMarketPlace),
 			errors.Is(err, services.ErrInvalidChannel),
+			errors.Is(err, services.ErrInvalidHourRange),
 			errors.Is(err, services.ErrCodesEmpty),
 			errors.Is(err, services.ErrTooManyCodes),
 			errors.Is(err, services.ErrCodeTooLong):
