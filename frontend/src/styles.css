@@ -2909,3 +2909,174 @@ footer code {
 }
 .hour-select:hover { border-color: var(--border-strong); }
 .hour-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Timeline de incidencias ── */
+.inctl__toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.inctl__form {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  margin-bottom: 16px;
+  display: grid;
+  gap: 12px;
+  background: var(--surface-2);
+}
+.inctl__form-row { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+.inctl__horas { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.inctl__tipos { display: flex; gap: 8px; flex-wrap: wrap; }
+.inctl__input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text-1);
+  background: var(--surface);
+  resize: vertical;
+}
+.inctl__input:focus { outline: none; border-color: var(--brand-primary); box-shadow: var(--shadow-focus); }
+.inctl__list { list-style: none; margin: 0; padding: 0 0 0 6px; position: relative; }
+.inctl__list::before {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--border);
+}
+.inctl__item { position: relative; display: flex; gap: 14px; padding: 8px 0; }
+.inctl__dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-top: 16px;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  z-index: 1;
+}
+.inctl__item--error .inctl__dot { background: var(--error); }
+.inctl__item--plan_b .inctl__dot { background: var(--plan-b); }
+.inctl__item--ambos .inctl__dot {
+  background: linear-gradient(135deg, var(--plan-b) 50%, var(--error) 50%);
+}
+.inctl__card {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 12px 16px;
+  background: var(--surface);
+}
+.inctl__card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.inctl__fecha { font-weight: 650; font-size: 13.5px; color: var(--text-1); }
+.inctl__horario {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.inctl__badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 600;
+  border-radius: var(--r-full);
+  padding: 2px 10px;
+}
+.inctl__badge--error { background: var(--danger-soft); color: var(--danger); }
+.inctl__badge--planb { background: var(--warning-soft); color: #9a6b00; }
+.inctl__badge--ambos {
+  background: linear-gradient(90deg, var(--warning-soft), var(--danger-soft));
+  color: var(--text-1);
+}
+.inctl__spacer { flex: 1; }
+.inctl__delete {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); padding: 4px; border-radius: var(--r-sm);
+}
+.inctl__delete:hover { color: var(--danger); background: var(--danger-soft); }
+.inctl__confirm { color: var(--danger); border-color: var(--danger); }
+.inctl__titulo { margin: 8px 0 2px; font-size: 14px; font-weight: 600; color: var(--text-1); }
+.inctl__desc { margin: 0 0 6px; font-size: 13px; color: var(--text-2); white-space: pre-wrap; }
+.inctl__meta { font-size: 11.5px; color: var(--text-muted); }
+.inctl__empty { padding: 26px 16px; }
+
+/* ── Modo edición de incidencias ── */
+.inctl__editing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brand-primary);
+}
+.inctl__item--editing .inctl__card { border-color: var(--brand-primary); }
+
+/* ── Paleta de color de la línea de incidencia ── */
+.inctl__swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.inctl__swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  cursor: pointer;
+  transition: transform var(--t-fast);
+}
+.inctl__swatch:hover { transform: scale(1.12); }
+.inctl__swatch--sel {
+  box-shadow: 0 0 0 2px var(--brand-primary);
+  transform: scale(1.12);
+}
+
+/* ── Clave de incidencias bajo la gráfica diaria ── */
+.inckey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.inckey__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  padding: 3px 6px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font: inherit;
+  max-width: 100%;
+}
+.inckey__item:hover { background: var(--surface-2); }
+.inckey__num {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-2);
+  background: var(--surface);
+}
+.inckey__titulo {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 380px;
+}
+.inckey__rango {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

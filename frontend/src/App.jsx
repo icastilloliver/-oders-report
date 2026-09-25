@@ -20,6 +20,7 @@ import {
   EyeOff,
   ShoppingBag,
   Radar,
+  Flag,
   Smartphone,
   Monitor,
   Globe,
@@ -40,6 +41,9 @@ import ErrorFulfillmentSplit from './components/ErrorFulfillmentSplit.jsx';
 import ErrorTrendChart from './components/ErrorTrendChart.jsx';
 import ErrorDailyStack from './components/ErrorDailyStack.jsx';
 import ChannelPie from './components/ChannelPie.jsx';
+import HourlyTimeline from './components/HourlyTimeline.jsx';
+import IncidentTimeline from './components/IncidentTimeline.jsx';
+import { generarReportePdf } from './reportPdf.js';
 import { KpiSkeleton, ChartSkeleton } from './components/Skeleton.jsx';
 import CalendarWidget from './components/CalendarWidget.jsx';
 import DateRange from './components/DateRange.jsx';
@@ -186,6 +190,8 @@ function App() {
   const [fsplit, setFsplit] = useState(null); // error por tipo de surtido · solo LP Decomm
   const [errorTrend, setErrorTrend] = useState(null); // serie diaria de errores · tabs Decomm
   const [channels, setChannels] = useState(null); // reparto por canal · tabs Decomm
+  const [hourly, setHourly] = useState(null); // timeline por hora · solo al filtrar 1 día
+  const [incidents, setIncidents] = useState([]); // bitácora de afectaciones · tabs Decomm
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [startDate, setStartDate] = useState(() => toISO(startOfMonth(today())));
@@ -209,6 +215,7 @@ function App() {
   const [activeQuick, setActiveQuick] = useState(null);
   const [now, setNow] = useState(() => new Date());
   const [csvExporting, setCsvExporting] = useState(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
   const [csvExportError, setCsvExportError] = useState(null);
 
   /* ── Fetch principal + rango previo (para tendencias) ──
@@ -283,10 +290,33 @@ function App() {
         prevParams += `&hourStart=${hs}&hourEnd=${he}`;
       }
 
-      const [resCurr, resPrev] = await Promise.all([
+      // Timeline horario: para cualquier rango (el query agrega por hora del
+      // día a través de todos los días seleccionados); el recalculo no aplica.
+      const [resCurr, resPrev, resHourly] = await Promise.all([
         fetch(`${endpoint}${queryParams}`),
         fetch(`${endpoint}${prevParams}`).catch(() => null),
+        !isRecalc ? fetch(`/api/orders-hourly${queryParams}`).catch(() => null) : Promise.resolve(null),
       ]);
+
+      if (resHourly && resHourly.ok) {
+        setHourly((await resHourly.json()).data);
+      } else {
+        setHourly(null);
+      }
+
+      /* Bitácora de incidencias del rango (compañía actual) */
+      if (!isRecalc) {
+        try {
+          const resInc = await fetch(
+            `/api/incidents?company=${finalCompany}&start=${effectiveStart}&end=${toApiEnd(effectiveEnd)}`
+          );
+          setIncidents(resInc.ok ? (await resInc.json()).data : []);
+        } catch {
+          setIncidents([]); // complementaria: no rompe la vista
+        }
+      } else {
+        setIncidents([]);
+      }
 
       if (!resCurr.ok) {
         const err = await resCurr.json().catch(() => ({}));
@@ -433,6 +463,52 @@ function App() {
       setCsvExportError(err.message);
     } finally {
       setCsvExporting(false);
+    }
+  };
+
+  /* ── Reporte PDF: gráfica diaria + incidencias + tabla de % ── */
+  const descargarPdf = async () => {
+    if (pdfExporting) return;
+    setPdfExporting(true);
+    try {
+      const filtros = [];
+      if (fulfillment !== 'all') {
+        filtros.push(fulfillment === 'Liverpool_CNC_PICK_PACK' ? 'Click & Collect' : 'Entrega a domicilio');
+      }
+      if (marketplace !== 'all' && company === 'LP_DECOMM') {
+        filtros.push(marketplace === 'true' ? 'Marketplace' : 'Catálogo propio');
+      }
+      if (channel !== 'all') filtros.push(`Canal ${channel}`);
+      if (hourStart !== '' || hourEnd !== '') {
+        filtros.push(`Hora ${(hourStart || '0').padStart(2, '0')}:00-${(hourEnd || '23').padStart(2, '0')}:59 CDMX`);
+      }
+
+      const brand = getComputedStyle(document.documentElement)
+        .getPropertyValue('--brand-primary').trim() || '#833177';
+      const colorDeIncidencia = (inc) =>
+        inc.color || (inc.tipo === 'PLAN_B' ? '#f0b133' : inc.tipo === 'AMBOS' ? '#8b5cf6' : '#ff3333');
+
+      const base = toBQCompany(company);
+      const boutique = BOUTIQUE_LABELS[company.replace('_DECOMM', '')];
+      const tituloCompania = company.includes('RECALC')
+        ? 'Recalculadas'
+        : boutique || (base === 'LP' ? 'Liverpool' : base === 'SB' ? 'Suburbia' : base);
+
+      const doc = await generarReportePdf({
+        tituloCompania,
+        rangeLabel,
+        filtrosTexto: filtros.join(' · '),
+        data,
+        incidents,
+        colorDeIncidencia,
+        chartCanvas: document.getElementById('daily-plan-chart'),
+        brandColor: brand,
+      });
+      doc.save(`reporte_${toBQCompany(company)}_${startDate}_${endDate}.pdf`);
+    } catch (err) {
+      setCsvExportError(`No se pudo generar el PDF: ${err.message}`);
+    } finally {
+      setPdfExporting(false);
     }
   };
 
@@ -926,6 +1002,20 @@ function App() {
                     : ''}
                 </p>
               </div>
+              <button
+                type="button"
+                className="chip"
+                onClick={descargarPdf}
+                disabled={pdfExporting || data.length === 0}
+                title="Descargar reporte PDF: gráfica, incidencias y tabla de porcentajes"
+              >
+                {pdfExporting ? (
+                  <span className="spinner" aria-hidden="true" />
+                ) : (
+                  <Download size={12} />
+                )}
+                Reporte PDF
+              </button>
               {company === 'SBB_DECOMM' && (
                 <button
                   type="button"
@@ -948,8 +1038,59 @@ function App() {
             <BarChart
               data={data}
               hideError={company === 'SBB_DECOMM' && !showErrorSeries}
+              incidents={incidents}
             />
           </div>
+
+          {/* Bitácora de incidencias · explica los picos de la gráfica de arriba */}
+          {!company.includes('RECALC') && (
+            <div className="chart-card">
+              <div className="chart-card__head">
+                <div>
+                  <h2>
+                    <Flag size={18} strokeWidth={2.2} />
+                    Timeline de incidencias
+                  </h2>
+                  <p className="subtitle">
+                    Afectaciones registradas a mano que explican los picos de Plan B y de Error
+                    — cada una se marca con ▲ sobre su día en la gráfica de arriba y aparece en
+                    el tooltip · visible para todo el equipo
+                  </p>
+                </div>
+              </div>
+              <IncidentTimeline
+                incidents={incidents}
+                company={toBQCompany(company)}
+                defaultDate={endDate}
+                onChanged={() => fetchData()}
+              />
+            </div>
+          )}
+
+          {/* Timeline por hora: del día (rango de 1 día) o perfil horario del rango */}
+          {hourly && (
+            <div className="chart-card">
+              <div className="chart-card__head">
+                <div>
+                  <h2>
+                    <Clock size={18} strokeWidth={2.2} />
+                    {startDate === endDate
+                      ? 'Timeline del día por hora'
+                      : 'Perfil horario del rango'}
+                  </h2>
+                  <p className="subtitle">
+                    % de Error y de Plan B sobre las líneas de cada hora en CDMX
+                    {startDate === endDate
+                      ? ''
+                      : ' — cada punto agrega esa hora en todos los días del rango'}
+                    {' '}· respeta fecha, hora y demás filtros activos · el tooltip trae los
+                    volúmenes exactos
+                  </p>
+                </div>
+              </div>
+              <HourlyTimeline data={hourly} rangoDeUnDia={startDate === endDate} />
+            </div>
+          )}
 
           {/* % Error diario abierto por causal · tabs SBB Decomm y LP Decomm */}
           {(company === 'SBB_DECOMM' || company === 'LP_DECOMM') &&

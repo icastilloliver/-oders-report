@@ -28,6 +28,11 @@ type OrdersRepository interface {
 	GetErrorTrend(ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string, hourStart, hourEnd int) (days []*model.ErrorTrendDay, codes []*model.ErrorTrendCode, err error)
 	GetErrorCodesFulfillment(ctx context.Context, company, marketPlace, channel, startDate, endDate string, hourStart, hourEnd int) (map[string]*model.FulfillmentSegment, error)
 	GetChannelBreakdown(ctx context.Context, company, productType, fulfillmentType, marketPlace, startDate, endDate string, hourStart, hourEnd int) ([]*model.ChannelCount, error)
+	GetOrdersHourly(ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string, hourStart, hourEnd int) ([]*model.HourlyBucket, error)
+	ListIncidents(ctx context.Context, company, startDate, endDate string) ([]*model.Incident, error)
+	CreateIncident(ctx context.Context, inc *model.Incident) error
+	UpdateIncident(ctx context.Context, inc *model.Incident) (int64, error)
+	DeleteIncident(ctx context.Context, id string) (int64, error)
 }
 
 // productTypeVariants espeja al helper homónimo de server.js: 'BIG TICKET'/'BT'

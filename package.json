@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "description": "Dashboard de Reporte de Pedidos LP",
   "scripts": {
-    "dev:backend": "cd backend && go run ./cmd/api",
+    "predev:full": "npm run kill:ports",
+    "kill:ports": "lsof -ti :8080 -ti :5173 | xargs kill 2>/dev/null; exit 0",
+    "dev:backend": "cd backend && go build -o .dev-api ./cmd/api && exec ./.dev-api",
     "dev:frontend": "npm run dev --prefix frontend",
-    "dev:full": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:full": "concurrently -k -n api,web \"cd backend && go build -o .dev-api ./cmd/api && exec ./.dev-api\" \"npm run dev --prefix frontend\"",
     "deploy": "gcloud run deploy reporte-pedidos-lp --source . --region us-central1 --allow-unauthenticated --project fechaestimadaentregaprod --set-env-vars=\"GCP_PROJECT_ID=fechaestimadaentregaprod,BQ_LOCATION=US\""
   },
   "devDependencies": {

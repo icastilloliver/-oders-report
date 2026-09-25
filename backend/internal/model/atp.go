@@ -100,3 +100,32 @@ type ChannelCount struct {
 	Total   int64  `json:"total"`
 	Errores int64  `json:"errores"`
 }
+
+// HourlyBucket es una hora del día (CDMX) con la clasificación de la vista:
+// alimenta el timeline horario del Historial cuando se filtra un solo día.
+type HourlyBucket struct {
+	Hora  int   `json:"Hora"`
+	PlanA int64 `json:"Plan_A"`
+	PlanB int64 `json:"Plan_B"`
+	Error int64 `json:"Error"`
+	Total int64 `json:"Total"`
+}
+
+// Incident es una afectación registrada a mano desde el tablero: explica un
+// pico de Plan B o de Error en la distribución diaria. Fecha y horas en CDMX.
+type Incident struct {
+	ID      string `json:"id"`
+	Company string `json:"company"`
+	Fecha   string `json:"fecha"`
+	// FechaFin marca el último día afectado cuando la incidencia duró varios
+	// días; nil = afectación de un solo día (Fecha).
+	FechaFin *string `json:"fechaFin"`
+	HoraInicio  *int   `json:"horaInicio"`
+	HoraFin     *int   `json:"horaFin"`
+	Tipo string `json:"tipo"` // PLAN_B | ERROR | AMBOS
+	// Color de la línea en la gráfica (hex #rrggbb); vacío = color por tipo.
+	Color  string `json:"color"`
+	Titulo string `json:"titulo"`
+	Descripcion string `json:"descripcion"`
+	CreatedAt   string `json:"createdAt"`
+}

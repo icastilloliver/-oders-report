@@ -207,6 +207,46 @@ func (h *OrdersHandler) handleErrorCodesFulfillment(w http.ResponseWriter, r *ht
 	}
 }
 
+func (h *OrdersHandler) HandlerOrdersHourly(w http.ResponseWriter, r *http.Request) {
+	company := r.URL.Query().Get("company")
+	productType := r.URL.Query().Get("productType")
+	fulfillmentType := r.URL.Query().Get("fulfillmentType")
+	marketPlace := r.URL.Query().Get("marketPlace")
+	channel := r.URL.Query().Get("channel")
+	hourStart := r.URL.Query().Get("hourStart")
+	hourEnd := r.URL.Query().Get("hourEnd")
+	startDate := r.URL.Query().Get("start")
+	endDate := r.URL.Query().Get("end")
+
+	data, err := h.service.GetOrdersHourly(r.Context(), company, productType, fulfillmentType, marketPlace, channel, startDate, endDate, hourStart, hourEnd)
+	if err != nil {
+		utils.Logging("ERROR", "Error getting hourly timeline", "", map[string]any{
+			"query": r.URL.Query(),
+			"error": err.Error(),
+		})
+		switch {
+		case errors.Is(err, services.ErrInvalidDateFormat),
+			errors.Is(err, services.ErrInvalidFulfillmentType),
+			errors.Is(err, services.ErrInvalidMarketPlace),
+			errors.Is(err, services.ErrInvalidChannel),
+			errors.Is(err, services.ErrInvalidHourRange):
+			writeJSONError(w, http.StatusBadRequest, err)
+		default:
+			writeJSONError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":    data,
+		"range":   map[string]string{"start": startDate, "end": endDate},
+		"company": company,
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func (h *OrdersHandler) HandlerChannelBreakdown(w http.ResponseWriter, r *http.Request) {
 	company := r.URL.Query().Get("company")
 	productType := r.URL.Query().Get("productType")

@@ -238,10 +238,9 @@ func buildOrdersCSVQuery(p OrdersCSVParams) (string, []bigquery.QueryParameter, 
 
 		var filterFulfillment string
 		if p.FulfillmentType != "" {
+			// El parámetro @fulfillmentType ya se agregó en la sección común
+			// (antes del switch): aquí solo va la cláusula SQL.
 			filterFulfillment = "AND fulfillmentType = @fulfillmentType"
-			// Sin este append el filtro de surtido tronaba en BigQuery por
-			// parámetro faltante (bug del port original a Go).
-			params = append(params, bigquery.QueryParameter{Name: "fulfillmentType", Value: p.FulfillmentType})
 		}
 
 		var filterChannel string

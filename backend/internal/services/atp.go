@@ -431,6 +431,33 @@ func normalizeChannel(c string) (string, error) {
 	return strings.ToUpper(c), nil
 }
 
+// GetOrdersHourly valida filtros y regresa el timeline por hora del día.
+func (o *OrdersService) GetOrdersHourly(
+	ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate, hourStart, hourEnd string,
+) ([]*model.HourlyBucket, error) {
+	if company == "" {
+		company = "LP"
+	}
+	if err := validateRealDates(startDate, endDate); err != nil {
+		return nil, err
+	}
+	if fulfillmentType != "" && !slices.Contains(repository.FulfillmentTypes, fulfillmentType) {
+		return nil, ErrInvalidFulfillmentType
+	}
+	if marketPlace != "" && marketPlace != "true" && marketPlace != "false" {
+		return nil, ErrInvalidMarketPlace
+	}
+	channel, err := normalizeChannel(channel)
+	if err != nil {
+		return nil, err
+	}
+	hs, he, err := parseHourRange(hourStart, hourEnd)
+	if err != nil {
+		return nil, err
+	}
+	return o.order.GetOrdersHourly(ctx, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate, hs, he)
+}
+
 // validateRealDates exige fechas de calendario reales, no solo con la forma
 // correcta: '2026-02-31' pasaría un regex y reventaría en BigQuery como 500.
 func validateRealDates(dates ...string) error {

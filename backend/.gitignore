@@ -4,3 +4,4 @@ service-account.json
 *.json.key
 *.log
 .DS_Store
+.dev-api

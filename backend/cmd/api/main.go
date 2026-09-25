@@ -8,9 +8,12 @@ import (
 	"edd-panel-backend/internal/services"
 	"edd-panel-backend/internal/transport"
 	"edd-panel-backend/pkg/utils"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 	_ "time/tzdata" // embebe la base de timezones para que LoadLocation funcione sin tzdata del SO
 
@@ -60,6 +63,8 @@ func main() {
 	http.HandleFunc("/api/atp-decomm-rows", ordersHandler.HandlerAtpDecommRows)
 	http.HandleFunc("/api/atp-validate", ordersHandler.HandlerAtpValidate)
 	http.HandleFunc("/api/channel-breakdown", ordersHandler.HandlerChannelBreakdown)
+	http.HandleFunc("/api/orders-hourly", ordersHandler.HandlerOrdersHourly)
+	http.HandleFunc("/api/incidents", ordersHandler.HandlerIncidents)
 
 	// Sirve el build del frontend (y su fallback a index.html) para
 	// cualquier ruta que no sea /api/*. En Cloud Run, el binario Go es lo
@@ -84,9 +89,29 @@ func main() {
 		port = "8080"
 	}
 
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: stackMiddlewares(http.DefaultServeMux),
+	}
+
+	// Apagado limpio: Ctrl+C (SIGINT) o kill (SIGTERM) cierran el listener de
+	// inmediato —el puerto se libera— y dan 5 s de gracia a las peticiones en
+	// vuelo. Cloud Run manda SIGTERM antes de bajar la instancia.
+	shutdownCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		<-shutdownCtx.Done()
+		utils.Logging("INFO", "Shutdown signal received, draining…", "main", nil)
+		graceCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(graceCtx)
+	}()
+
 	utils.Logging("INFO", fmt.Sprintf("Starting server on :%s", port), "main", nil)
-	if err := http.ListenAndServe(":"+port, stackMiddlewares(http.DefaultServeMux)); err != nil {
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		utils.Logging("ERROR", "Error starting server", "main", err.Error())
 		return
 	}
+	utils.Logging("INFO", "Server stopped cleanly", "main", nil)
 }
