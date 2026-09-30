@@ -293,15 +293,21 @@ type fulfillmentCodeBQ struct {
 // errorCode dentro de cada segmento.
 func (o *Orders) GetErrorCodesFulfillment(
 	ctx context.Context,
-	company, marketPlace, channel, startDate, endDate string,
+	company, productType, marketPlace, channel, startDate, endDate string,
 	hourStart, hourEnd int,
 ) (map[string]*model.FulfillmentSegment, error) {
 	params := []bigquery.QueryParameter{
-		{Name: "company", Value: company},
 		{Name: "start", Value: fmt.Sprintf("%s 00:00:00", startDate)},
 		{Name: "end", Value: fmt.Sprintf("%s 00:00:00", endDate)},
 	}
+	var companyClause string
+	companyClause, params = companyFilter(company, params)
 
+	var filterProductType string
+	if productType != "" {
+		filterProductType = "AND UPPER(TRIM(productType)) IN UNNEST(@productTypes)"
+		params = append(params, bigquery.QueryParameter{Name: "productTypes", Value: productTypeVariants(productType)})
+	}
 	var filterMarketplace string
 	if marketPlace != "" {
 		filterMarketplace = "AND marketPlace = @marketPlace"
@@ -323,14 +329,15 @@ func (o *Orders) GetErrorCodesFulfillment(
 				errorMessage,
 				%s AS clasificacion
 			FROM `+"`crp-pro-dig-edd.mus_pro_digital_prd_tbls.FAC_EDD_ORDERS_TRN`"+`
-			WHERE company = @company
+			WHERE %s
+				%s
 				%s
 				%s
 				%s
 				AND ingestionTimestamp >= TIMESTAMP(@start, 'America/Mexico_City')
 				AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
 		)
-	`, fulfillmentBucketSQL, errorCodeNormSQL, clasificacionSQL, filterMarketplace, filterChannel, filterHour)
+	`, fulfillmentBucketSQL, errorCodeNormSQL, clasificacionSQL, companyClause, filterProductType, filterMarketplace, filterChannel, filterHour)
 
 	segments := map[string]*model.FulfillmentSegment{
 		"domicilio": {Codes: []*model.ErrorCodeCount{}},

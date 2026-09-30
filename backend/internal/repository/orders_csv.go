@@ -228,7 +228,8 @@ func buildOrdersCSVQuery(p OrdersCSVParams) (string, []bigquery.QueryParameter, 
 		return query, params, location, nil
 
 	case OrdersCSVTypeDecomm:
-		params = append(params, bigquery.QueryParameter{Name: "company", Value: p.Company})
+		var companyClause string
+		companyClause, params = companyFilter(p.Company, params)
 
 		var filterProductType string
 		if p.ProductType != "" {
@@ -271,7 +272,7 @@ func buildOrdersCSVQuery(p OrdersCSVParams) (string, []bigquery.QueryParameter, 
 						ELSE 'Error'
 					END AS clasificacion
 				FROM `+"`crp-pro-dig-edd.mus_pro_digital_prd_tbls.FAC_EDD_ORDERS_TRN`"+`
-				WHERE company = @company
+				WHERE %s
 					%s
 					%s
 					%s
@@ -281,7 +282,7 @@ func buildOrdersCSVQuery(p OrdersCSVParams) (string, []bigquery.QueryParameter, 
 					AND ingestionTimestamp <  TIMESTAMP(@end,   'America/Mexico_City')
 			)
 			SELECT * FROM base WHERE clasificacion IN ('Error', 'Plan B')
-		`, filterProductType, filterFulfillment, filterMarketPlace, filterChannel, filterHour)
+		`, companyClause, filterProductType, filterFulfillment, filterMarketPlace, filterChannel, filterHour)
 
 		return query, params, "", nil
 

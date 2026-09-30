@@ -19,37 +19,47 @@ import (
 // streaming buffer de BigQuery.
 const incidentsTable = "`fechaestimadaentregaprod.alltables.dashboard_incidents`"
 
-var ensureIncidentsOnce sync.Once
+var (
+	ensureIncidentsMu   sync.Mutex
+	incidentsTableReady bool
+)
 
-// ensureIncidentsTable crea la tabla si no existe (idempotente, corre una
-// vez por proceso).
+// ensureIncidentsTable crea la tabla si no existe (idempotente). No usa
+// sync.Once a propósito: si el primer intento falla (error transitorio de
+// BigQuery, ctx cancelado), el siguiente request debe poder reintentar en
+// lugar de quedar quemado hasta reiniciar el proceso.
 func (o *Orders) ensureIncidentsTable(ctx context.Context) error {
-	var err error
-	ensureIncidentsOnce.Do(func() {
-		q := o.client.Query(fmt.Sprintf(`
-			CREATE TABLE IF NOT EXISTS %s (
-				id          STRING NOT NULL,
-				company     STRING NOT NULL,
-				fecha       DATE   NOT NULL,
-				fecha_fin   DATE, -- último día afectado; NULL = un solo día
-				hora_inicio INT64,
-				hora_fin    INT64,
-				tipo        STRING NOT NULL, -- PLAN_B | ERROR | AMBOS
-				titulo      STRING NOT NULL,
-				descripcion STRING,
-				created_at  TIMESTAMP NOT NULL
-			)
-		`, incidentsTable))
-		if _, err = runDML(ctx, q); err != nil {
-			return
-		}
-		// Migraciones para tablas creadas antes (multi-día y color).
-		alter := o.client.Query(fmt.Sprintf(
-			"ALTER TABLE %s ADD COLUMN IF NOT EXISTS fecha_fin DATE, ADD COLUMN IF NOT EXISTS color STRING",
-			incidentsTable))
-		_, err = runDML(ctx, alter)
-	})
-	return err
+	ensureIncidentsMu.Lock()
+	defer ensureIncidentsMu.Unlock()
+	if incidentsTableReady {
+		return nil
+	}
+	q := o.client.Query(fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			id          STRING NOT NULL,
+			company     STRING NOT NULL,
+			fecha       DATE   NOT NULL,
+			fecha_fin   DATE, -- último día afectado; NULL = un solo día
+			hora_inicio INT64,
+			hora_fin    INT64,
+			tipo        STRING NOT NULL, -- PLAN_B | ERROR | AMBOS
+			titulo      STRING NOT NULL,
+			descripcion STRING,
+			created_at  TIMESTAMP NOT NULL
+		)
+	`, incidentsTable))
+	if _, err := runDML(ctx, q); err != nil {
+		return err
+	}
+	// Migraciones para tablas creadas antes (multi-día y color).
+	alter := o.client.Query(fmt.Sprintf(
+		"ALTER TABLE %s ADD COLUMN IF NOT EXISTS fecha_fin DATE, ADD COLUMN IF NOT EXISTS color STRING",
+		incidentsTable))
+	if _, err := runDML(ctx, alter); err != nil {
+		return err
+	}
+	incidentsTableReady = true
+	return nil
 }
 
 func runDML(ctx context.Context, q *bigquery.Query) (*bigquery.JobStatus, error) {

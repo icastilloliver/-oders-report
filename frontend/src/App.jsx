@@ -19,6 +19,8 @@ import {
   Eye,
   EyeOff,
   ShoppingBag,
+  Package,
+  Shirt,
   Radar,
   Flag,
   Smartphone,
@@ -26,6 +28,7 @@ import {
   Globe,
   Phone,
   TrendingUp,
+  Bell,
 } from 'lucide-react';
 import Sidebar from './components/Sidebar.jsx';
 import KpiCards from './components/KpiCards.jsx';
@@ -38,11 +41,13 @@ import BulkOrderCheck from './components/BulkOrderCheck.jsx';
 import AtpDecomm from './components/AtpDecomm.jsx';
 import ErrorCodePie from './components/ErrorCodePie.jsx';
 import ErrorFulfillmentSplit from './components/ErrorFulfillmentSplit.jsx';
+import FulfillmentPies from './components/FulfillmentPies.jsx';
 import ErrorTrendChart from './components/ErrorTrendChart.jsx';
 import ErrorDailyStack from './components/ErrorDailyStack.jsx';
 import ChannelPie from './components/ChannelPie.jsx';
 import HourlyTimeline from './components/HourlyTimeline.jsx';
 import IncidentTimeline from './components/IncidentTimeline.jsx';
+import AlertCenter from './components/AlertCenter.jsx';
 import { generarReportePdf } from './reportPdf.js';
 import { KpiSkeleton, ChartSkeleton } from './components/Skeleton.jsx';
 import CalendarWidget from './components/CalendarWidget.jsx';
@@ -137,6 +142,7 @@ const MULTISITE_DECOMM = ['WS', 'DCK', 'GAP', 'PB', 'PBK', 'BRU', 'BR', 'DPS', '
 
 /** Nombre comercial de cada boutique (código interno usado en `company` sigue siendo {SITE}_DECOMM) */
 const BOUTIQUE_LABELS = {
+  BTQ: 'Todas las boutiques',
   WS: 'Willian Sonoma',
   DCK: 'Dockers',
   GAP: 'GAP',
@@ -164,8 +170,10 @@ const SIDEBAR_ITEMS = [
         key: 'boutiques',
         label: 'Boutiques',
         // No es una sola compañía: agrupa los sitios de MULTISITE_DECOMM,
-        // que ahora se eligen con el filtro "Boutique" dentro del dashboard.
-        matchKeys: MULTISITE_DECOMM.map((site) => `${site}_DECOMM`),
+        // que se eligen con el filtro "Boutique" dentro del dashboard. El
+        // primero es el concentrado (BTQ = todas las boutiques juntas), que
+        // es donde abre la vista al entrar desde el sidebar.
+        matchKeys: ['BTQ_DECOMM', ...MULTISITE_DECOMM.map((site) => `${site}_DECOMM`)],
       },
     ],
   },
@@ -192,6 +200,7 @@ function App() {
   const [channels, setChannels] = useState(null); // reparto por canal · tabs Decomm
   const [hourly, setHourly] = useState(null); // timeline por hora · solo al filtrar 1 día
   const [incidents, setIncidents] = useState([]); // bitácora de afectaciones · tabs Decomm
+  const [thresholds, setThresholds] = useState(null); // umbrales de alertamiento por compañía
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [startDate, setStartDate] = useState(() => toISO(startOfMonth(today())));
@@ -206,6 +215,9 @@ function App() {
   const [marketplace, setMarketplace] = useState('false');
   // Filtro principal por canal de venta: 'all' | APP | WEB | WAP | CSC
   const [channel, setChannel] = useState('all');
+  // Filtro por tipo de producto (columna productType): 'all' | 'BIG TICKET' |
+  // 'SOFT LINE'. El backend normaliza grafías ('Soft Line'/'SL', etc.).
+  const [productType, setProductType] = useState('all');
   // Filtro por hora del día en CDMX ('' = sin filtro). Se manda en pareja:
   // si solo se elige una, la otra se completa con 0 / 23.
   const [hourStart, setHourStart] = useState('');
@@ -282,6 +294,12 @@ function App() {
         prevParams += `&channel=${channel}`;
       }
 
+      // Tipo de producto (Big Ticket / Soft Line) · el recalculo no lo trae
+      if (productType !== 'all' && !isRecalc) {
+        queryParams += `&productType=${encodeURIComponent(productType)}`;
+        prevParams += `&productType=${encodeURIComponent(productType)}`;
+      }
+
       // Hora del día (CDMX) · aplica sobre ingestionTimestamp del decomm
       if ((hourStart !== '' || hourEnd !== '') && !isRecalc) {
         const hs = hourStart === '' ? '0' : hourStart;
@@ -346,6 +364,7 @@ function App() {
           if (fulfillment !== 'all') p.set('fulfillmentType', fulfillment);
           if (company === 'LP_DECOMM' && marketplace !== 'all') p.set('marketPlace', marketplace);
           if (channel !== 'all') p.set('channel', channel);
+          if (productType !== 'all') p.set('productType', productType);
           if (hourStart !== '' || hourEnd !== '') {
             p.set('hourStart', hourStart === '' ? '0' : hourStart);
             p.set('hourEnd', hourEnd === '' ? '23' : hourEnd);
@@ -379,17 +398,20 @@ function App() {
         setChannels(null);
       }
 
-      /* Comparativa de error por tipo de surtido: exclusiva de LP Decomm.
-         No lleva el filtro de surtido (compara ambos), pero sí el de producto. */
-      if (company === 'LP_DECOMM') {
+      /* Comparativa por tipo de surtido (todos los tabs decomm, incl. el
+         concentrado BTQ): alimenta los pasteles de reparto y, en LP, la
+         tarjeta de causales. No lleva el filtro de surtido (compara ambos),
+         pero sí producto/canal/hora. */
+      if (!isRecalc) {
         try {
           const p = new URLSearchParams({
             start: effectiveStart,
             end: toApiEnd(effectiveEnd),
-            company: 'LP',
+            company: finalCompany,
           });
-          if (marketplace !== 'all') p.set('marketPlace', marketplace);
+          if (company === 'LP_DECOMM' && marketplace !== 'all') p.set('marketPlace', marketplace);
           if (channel !== 'all') p.set('channel', channel);
+          if (productType !== 'all') p.set('productType', productType);
           if (hourStart !== '' || hourEnd !== '') {
             p.set('hourStart', hourStart === '' ? '0' : hourStart);
             p.set('hourEnd', hourEnd === '' ? '23' : hourEnd);
@@ -407,7 +429,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, company, view, fulfillment, marketplace, channel, hourStart, hourEnd]);
+  }, [startDate, endDate, company, view, fulfillment, marketplace, channel, productType, hourStart, hourEnd]);
 
   // Usa fetch (y no window.open) para no abrir una pestaña en blanco: así se
   // puede mostrar el spinner en el botón y quedarse en la misma página.
@@ -431,6 +453,9 @@ function App() {
     }
     if (channel !== 'all' && !company.includes('RECALC')) {
       url += `&channel=${channel}`;
+    }
+    if (productType !== 'all' && !isRecalc) {
+      url += `&productType=${encodeURIComponent(productType)}`;
     }
     if ((hourStart !== '' || hourEnd !== '') && !company.includes('RECALC')) {
       url += `&hourStart=${hourStart === '' ? '0' : hourStart}&hourEnd=${hourEnd === '' ? '23' : hourEnd}`;
@@ -471,15 +496,21 @@ function App() {
     if (pdfExporting) return;
     setPdfExporting(true);
     try {
+      /* El recalculo no aplica estos filtros en el fetch: tampoco deben
+         listarse en el PDF aunque el estado persista de otro tab. */
+      const esRecalc = company.includes('RECALC');
       const filtros = [];
-      if (fulfillment !== 'all') {
+      if (fulfillment !== 'all' && !esRecalc) {
         filtros.push(fulfillment === 'Liverpool_CNC_PICK_PACK' ? 'Click & Collect' : 'Entrega a domicilio');
       }
       if (marketplace !== 'all' && company === 'LP_DECOMM') {
         filtros.push(marketplace === 'true' ? 'Marketplace' : 'Catálogo propio');
       }
-      if (channel !== 'all') filtros.push(`Canal ${channel}`);
-      if (hourStart !== '' || hourEnd !== '') {
+      if (channel !== 'all' && !esRecalc) filtros.push(`Canal ${channel}`);
+      if (productType !== 'all' && !esRecalc) {
+        filtros.push(productType === 'BIG TICKET' ? 'Big Ticket' : 'Soft Line');
+      }
+      if ((hourStart !== '' || hourEnd !== '') && !esRecalc) {
         filtros.push(`Hora ${(hourStart || '0').padStart(2, '0')}:00-${(hourEnd || '23').padStart(2, '0')}:59 CDMX`);
       }
 
@@ -519,13 +550,66 @@ function App() {
     // --brand-primary por JS: queda fijo en :root (styles.css).
     document.documentElement.setAttribute('data-company', company);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [company, view, fulfillment, marketplace, channel, hourStart, hourEnd]);
+  }, [company, view, fulfillment, marketplace, channel, productType, hourStart, hourEnd]);
 
   /* Reloj del header: un único intervalo durante toda la vida del componente */
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  /* ── Umbrales de alertamiento: config por compañía (BigQuery) ── */
+  useEffect(() => {
+    // Limpia SIEMPRE antes de fetchear: al cambiar LP→SB no debe quedar una
+    // ventana donde el form muestre los umbrales de LP etiquetados como SB.
+    setThresholds(null);
+    if (view !== 'planes' || company.includes('RECALC')) {
+      return undefined;
+    }
+    let alive = true;
+    fetch(`/api/thresholds?company=${toBQCompany(company)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (alive) setThresholds(j?.data ?? null);
+      })
+      .catch(() => {
+        if (alive) setThresholds(null); // complementario: no rompe la vista
+      });
+    return () => {
+      alive = false;
+    };
+  }, [company, view]);
+
+  /* Alertas: cada día del rango en pantalla que rompa un umbral. Se evalúa
+     sobre los datos ya filtrados (producto, canal, hora…): lo que alerta es
+     exactamente lo que la gráfica muestra. El epsilon evita falsos positivos
+     de punto flotante en días exactamente en el umbral ((7/100)*100 > 7). */
+  const breaches = useMemo(() => {
+    if (!thresholds?.enabled || view !== 'planes' || !data?.length) return [];
+    const EPS = 1e-9;
+    const out = [];
+    for (const d of data) {
+      if (!d.Total) continue;
+      const pA = (d.Plan_A / d.Total) * 100;
+      const pB = (d.Plan_B / d.Total) * 100;
+      const pE = (d.Error / d.Total) * 100;
+      if (thresholds.errorMax != null && pE > thresholds.errorMax + EPS) {
+        out.push({ fecha: d.Fecha, tipo: 'ERROR', valor: pE, umbral: thresholds.errorMax });
+      }
+      if (thresholds.planBMax != null && pB > thresholds.planBMax + EPS) {
+        out.push({ fecha: d.Fecha, tipo: 'PLAN_B', valor: pB, umbral: thresholds.planBMax });
+      }
+      if (thresholds.planAMin != null && pA < thresholds.planAMin - EPS) {
+        out.push({ fecha: d.Fecha, tipo: 'PLAN_A', valor: pA, umbral: thresholds.planAMin });
+      }
+    }
+    // Más recientes primero: el alertamiento es sobre lo que acaba de pasar.
+    return out.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+  }, [data, thresholds, view]);
+
+  const irAAlertas = () => {
+    document.getElementById('alert-center')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   /** Rango por defecto: primer día del mes en curso → hoy (el mismo con el que arranca la página) */
   const defaultRange = () => ({ start: toISO(startOfMonth(today())), end: todayISO() });
@@ -623,12 +707,36 @@ function App() {
             <h1>Fecha Estimada de Entrega</h1>
           </div>
 
-          <div className="app-header__meta">
-            <span className="dot" aria-hidden="true" />
-            <Clock size={12} />
-            <time dateTime={now.toISOString()}>
-              {clockDateFmt.format(now)} · {clockTimeFmt.format(now)}
-            </time>
+          <div className="app-header__meta-group">
+            {view === 'planes' && !company.includes('RECALC') && data.length > 0 && (
+              <button
+                type="button"
+                className={`bell ${breaches.length > 0 ? 'bell--on' : ''}`}
+                onClick={irAAlertas}
+                title={
+                  breaches.length > 0
+                    ? `${breaches.length} alerta${breaches.length === 1 ? '' : 's'} de umbral en el rango — ver detalle`
+                    : 'Sin alertas de umbral en el rango'
+                }
+                aria-label={
+                  breaches.length > 0
+                    ? `${breaches.length} alerta${breaches.length === 1 ? '' : 's'} de umbral en el rango`
+                    : 'Notificaciones de umbrales, sin alertas'
+                }
+              >
+                <Bell size={14} />
+                {breaches.length > 0 && (
+                  <span className="bell__badge">{breaches.length > 99 ? '99+' : breaches.length}</span>
+                )}
+              </button>
+            )}
+            <div className="app-header__meta">
+              <span className="dot" aria-hidden="true" />
+              <Clock size={12} />
+              <time dateTime={now.toISOString()}>
+                {clockDateFmt.format(now)} · {clockTimeFmt.format(now)}
+              </time>
+            </div>
           </div>
         </div>
       </header>
@@ -709,9 +817,9 @@ function App() {
           </div>
         )}
 
-        {/* Filtro por tipo de producto (marketPlace) · exclusivo del tab LP Decomm */}
+        {/* Filtro por origen del producto (marketPlace) · exclusivo del tab LP Decomm */}
         {view === 'planes' && company === 'LP_DECOMM' && (
-          <div className="quick-ranges" role="group" aria-label="Tipo de producto">
+          <div className="quick-ranges" role="group" aria-label="Producto">
             <span className="quick-ranges__label">
               <ShoppingBag size={12} /> Producto
             </span>
@@ -740,6 +848,46 @@ function App() {
               <Store size={12} />
               Catálogo propio
             </button>
+          </div>
+        )}
+
+        {/* Filtro por tipo de producto (productType) · Big Ticket vs Soft Line */}
+        {view === 'planes' && (
+          <div className="quick-ranges" role="group" aria-label="Tipo de producto">
+            <span className="quick-ranges__label">
+              <Package size={12} /> Tipo de producto
+            </span>
+            <button
+              type="button"
+              className={`chip ${productType === 'all' ? 'active' : ''}`}
+              onClick={() => setProductType('all')}
+              disabled={company.includes('RECALC')}
+            >
+              Todos
+            </button>
+            <button
+              type="button"
+              className={`chip ${productType === 'BIG TICKET' ? 'active' : ''}`}
+              onClick={() => setProductType('BIG TICKET')}
+              disabled={company.includes('RECALC')}
+              title="productType = Big Ticket"
+            >
+              <Package size={12} />
+              Big Ticket
+            </button>
+            <button
+              type="button"
+              className={`chip ${productType === 'SOFT LINE' ? 'active' : ''}`}
+              onClick={() => setProductType('SOFT LINE')}
+              disabled={company.includes('RECALC')}
+              title="productType = Soft Line"
+            >
+              <Shirt size={12} />
+              Soft Line
+            </button>
+            {company.includes('RECALC') && (
+              <span className="quick-ranges__note">No aplica al recalculo</span>
+            )}
           </div>
         )}
 
@@ -804,12 +952,23 @@ function App() {
         )}
 
         {/* Filtro de boutique · exclusivo del dashboard "Boutiques"
-            (agrupa lo que antes eran los tabs WS/DCK/GAP/PB/PBK/BRU Decomm) */}
-        {view === 'planes' && MULTISITE_DECOMM.some((site) => company === `${site}_DECOMM`) && (
+            (agrupa lo que antes eran los tabs WS/DCK/GAP/PB/PBK/BRU Decomm).
+            "Todas" = concentrado BTQ: el backend expande a company IN (...) */}
+        {view === 'planes' &&
+          (company === 'BTQ_DECOMM' || MULTISITE_DECOMM.some((site) => company === `${site}_DECOMM`)) && (
           <div className="quick-ranges" role="group" aria-label="Boutique">
             <span className="quick-ranges__label">
               <Store size={12} /> Boutique
             </span>
+            <button
+              type="button"
+              className={`chip ${company === 'BTQ_DECOMM' ? 'active' : ''}`}
+              onClick={() => setCompany('BTQ_DECOMM')}
+              title="Concentrado de todas las boutiques"
+            >
+              <Layers size={12} />
+              Todas
+            </button>
             {MULTISITE_DECOMM.map((site) => (
               <button
                 key={site}
@@ -1067,6 +1226,33 @@ function App() {
             </div>
           )}
 
+          {/* Alertas y umbrales · control de SLA por compañía */}
+          {!company.includes('RECALC') && (
+            <div className="chart-card" id="alert-center">
+              <div className="chart-card__head">
+                <div>
+                  <h2>
+                    <Bell size={18} strokeWidth={2.2} />
+                    Alertas y umbrales
+                  </h2>
+                  <p className="subtitle">
+                    Define el mínimo de Plan A y los máximos de Plan B y de Error — cada día del
+                    rango que rompa un umbral genera una alerta (se evalúa sobre los datos en
+                    pantalla, con los filtros activos) · la campana del header trae el conteo
+                  </p>
+                </div>
+              </div>
+              <AlertCenter
+                key={toBQCompany(company)}
+                company={toBQCompany(company)}
+                thresholds={thresholds}
+                onSaved={setThresholds}
+                breaches={breaches}
+                data={data}
+              />
+            </div>
+          )}
+
           {/* Timeline por hora: del día (rango de 1 día) o perfil horario del rango */}
           {hourly && (
             <div className="chart-card">
@@ -1193,6 +1379,27 @@ function App() {
                 </div>
               </div>
               <ErrorTrendChart days={errorTrend.days} codes={errorTrend.codes} />
+            </div>
+          )}
+
+          {/* Reparto por tipo de surtido · % de líneas y % del Error que
+              aporta cada surtido (domicilio vs C&C) · todos los tabs decomm */}
+          {!company.includes('RECALC') && fsplit && (
+            <div className="chart-card">
+              <div className="chart-card__head">
+                <div>
+                  <h2>
+                    <PieChart size={18} strokeWidth={2.2} />
+                    Reparto por tipo de surtido
+                  </h2>
+                  <p className="subtitle">
+                    Qué % de las líneas va por Entrega a domicilio vs Click &amp; Collect, y qué %
+                    del Error total aporta cada surtido · la tasa de cada segmento va en la
+                    leyenda y el tooltip · ignora el filtro de surtido, respeta los demás
+                  </p>
+                </div>
+              </div>
+              <FulfillmentPies segments={fsplit.segments} />
             </div>
           )}
 

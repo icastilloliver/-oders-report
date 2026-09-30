@@ -167,6 +167,7 @@ func (h *OrdersHandler) handleErrorTrend(w http.ResponseWriter, r *http.Request)
 
 func (h *OrdersHandler) handleErrorCodesFulfillment(w http.ResponseWriter, r *http.Request) {
 	company := r.URL.Query().Get("company")
+	productType := r.URL.Query().Get("productType")
 	marketPlace := r.URL.Query().Get("marketPlace")
 	channel := r.URL.Query().Get("channel")
 	hourStart := r.URL.Query().Get("hourStart")
@@ -174,7 +175,7 @@ func (h *OrdersHandler) handleErrorCodesFulfillment(w http.ResponseWriter, r *ht
 	startDate := r.URL.Query().Get("start")
 	endDate := r.URL.Query().Get("end")
 
-	segments, err := h.service.GetErrorCodesFulfillment(r.Context(), company, marketPlace, channel, startDate, endDate, hourStart, hourEnd)
+	segments, err := h.service.GetErrorCodesFulfillment(r.Context(), company, productType, marketPlace, channel, startDate, endDate, hourStart, hourEnd)
 	if err != nil {
 		utils.Logging("ERROR", "Error getting error codes fulfillment", "", map[string]any{
 			"query": r.URL.Query(),

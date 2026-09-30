@@ -372,7 +372,7 @@ func (o *OrdersService) GetErrorTrend(
 // GetErrorCodesFulfillment valida filtros y regresa la comparativa por
 // tipo de surtido (LP Decomm).
 func (o *OrdersService) GetErrorCodesFulfillment(
-	ctx context.Context, company, marketPlace, channel, startDate, endDate, hourStart, hourEnd string,
+	ctx context.Context, company, productType, marketPlace, channel, startDate, endDate, hourStart, hourEnd string,
 ) (map[string]*model.FulfillmentSegment, error) {
 	channel, err := normalizeChannel(channel)
 	if err != nil {
@@ -397,7 +397,7 @@ func (o *OrdersService) GetErrorCodesFulfillment(
 	if marketPlace != "" && marketPlace != "true" && marketPlace != "false" {
 		return nil, ErrInvalidMarketPlace
 	}
-	return o.order.GetErrorCodesFulfillment(ctx, company, marketPlace, channel, startDate, endDate, hs, he)
+	return o.order.GetErrorCodesFulfillment(ctx, company, productType, marketPlace, channel, startDate, endDate, hs, he)
 }
 
 // parseHourRange valida el filtro por hora del día (CDMX). Vacíos ambos =

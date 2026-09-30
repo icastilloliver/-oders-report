@@ -65,6 +65,7 @@ func main() {
 	http.HandleFunc("/api/channel-breakdown", ordersHandler.HandlerChannelBreakdown)
 	http.HandleFunc("/api/orders-hourly", ordersHandler.HandlerOrdersHourly)
 	http.HandleFunc("/api/incidents", ordersHandler.HandlerIncidents)
+	http.HandleFunc("/api/thresholds", ordersHandler.HandlerThresholds)
 
 	// Sirve el build del frontend (y su fallback a index.html) para
 	// cualquier ruta que no sea /api/*. En Cloud Run, el binario Go es lo

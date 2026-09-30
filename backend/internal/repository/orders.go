@@ -26,10 +26,12 @@ type OrdersRepository interface {
 	GetErrorCodesCSV(ctx context.Context, params ErrorCodesCSVParams) (header []string, rows [][]string, truncated bool, err error)
 	GetAtpDecommRows(ctx context.Context, company, fulfillmentType, startDate, endDate string) (rows []*model.AtpDecommRow, truncated bool, err error)
 	GetErrorTrend(ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string, hourStart, hourEnd int) (days []*model.ErrorTrendDay, codes []*model.ErrorTrendCode, err error)
-	GetErrorCodesFulfillment(ctx context.Context, company, marketPlace, channel, startDate, endDate string, hourStart, hourEnd int) (map[string]*model.FulfillmentSegment, error)
+	GetErrorCodesFulfillment(ctx context.Context, company, productType, marketPlace, channel, startDate, endDate string, hourStart, hourEnd int) (map[string]*model.FulfillmentSegment, error)
 	GetChannelBreakdown(ctx context.Context, company, productType, fulfillmentType, marketPlace, startDate, endDate string, hourStart, hourEnd int) ([]*model.ChannelCount, error)
 	GetOrdersHourly(ctx context.Context, company, productType, fulfillmentType, marketPlace, channel, startDate, endDate string, hourStart, hourEnd int) ([]*model.HourlyBucket, error)
 	ListIncidents(ctx context.Context, company, startDate, endDate string) ([]*model.Incident, error)
+	GetThresholds(ctx context.Context, company string) (*model.Thresholds, error)
+	UpsertThresholds(ctx context.Context, t *model.Thresholds) error
 	CreateIncident(ctx context.Context, inc *model.Incident) error
 	UpdateIncident(ctx context.Context, inc *model.Incident) (int64, error)
 	DeleteIncident(ctx context.Context, id string) (int64, error)
@@ -48,6 +50,22 @@ func productTypeVariants(productType string) []string {
 	default:
 		return []string{pt}
 	}
+}
+
+// boutiqueCompanies son los códigos que integran el concentrado de
+// boutiques: el pseudo-código 'BTQ' del dashboard expande a todos ellos.
+var boutiqueCompanies = []string{"WS", "DCK", "GAP", "PB", "PBK", "BRU", "BR", "DPS", "FAB", "LVS", "WLM"}
+
+// companyFilter arma el filtro de compañía y agrega sus parámetros: una
+// compañía exacta, o 'BTQ' que expande al concentrado de boutiques con
+// IN UNNEST (así los % del concentrado agregan todas las boutiques).
+func companyFilter(company string, params []bigquery.QueryParameter) (string, []bigquery.QueryParameter) {
+	if strings.EqualFold(strings.TrimSpace(company), "BTQ") {
+		params = append(params, bigquery.QueryParameter{Name: "companies", Value: boutiqueCompanies})
+		return "company IN UNNEST(@companies)", params
+	}
+	params = append(params, bigquery.QueryParameter{Name: "company", Value: company})
+	return "company = @company", params
 }
 
 // hourFilter arma el filtro por hora del día en zona America/Mexico_City y
@@ -103,16 +121,20 @@ func (o *Orders) GetOrdersSummary(
 	}
 
 	params := []bigquery.QueryParameter{
-		{Name: "company", Value: company},
 		{Name: "startDate", Value: start},
 		{Name: "endDate", Value: end},
 	}
+	var companyClause string
+	companyClause, params = companyFilter(company, params)
 
 	var filters strings.Builder
 
 	if productType != "" {
-		filters.WriteString(" AND productType = @productType")
-		params = append(params, bigquery.QueryParameter{Name: "productType", Value: productType})
+		// Mismo patrón que el resto de los endpoints: la columna trae grafías
+		// mezcladas ('Soft Line' en LP, 'SOFT LINE' en SBB), así que la
+		// igualdad exacta nunca matchea; se compara normalizado y con sinónimos.
+		filters.WriteString(" AND UPPER(TRIM(productType)) IN UNNEST(@productTypes)")
+		params = append(params, bigquery.QueryParameter{Name: "productTypes", Value: productTypeVariants(productType)})
 	}
 
 	if fulfillmentType != "" {
@@ -149,8 +171,8 @@ func (o *Orders) GetOrdersSummary(
 				plan,
 				edd1,
 				edd2
-			FROM %s  
-			WHERE company = @company%s
+			FROM %s
+			WHERE %s%s
 				AND ingestionTimestamp >= @startDate
 				AND ingestionTimestamp <  @endDate
 			),
@@ -174,7 +196,7 @@ func (o *Orders) GetOrdersSummary(
 			GROUP BY Fecha
 			ORDER BY Fecha
 			`
-	finalSQL := fmt.Sprintf(ordersSummaryQuery, ordersTableName, filters.String())
+	finalSQL := fmt.Sprintf(ordersSummaryQuery, ordersTableName, companyClause, filters.String())
 	q := o.client.Query(finalSQL)
 	q.Parameters = params
 

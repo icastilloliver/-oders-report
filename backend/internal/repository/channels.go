@@ -26,10 +26,11 @@ func (o *Orders) GetChannelBreakdown(
 	hourStart, hourEnd int,
 ) ([]*model.ChannelCount, error) {
 	params := []bigquery.QueryParameter{
-		{Name: "company", Value: company},
 		{Name: "start", Value: fmt.Sprintf("%s 00:00:00", startDate)},
 		{Name: "end", Value: fmt.Sprintf("%s 00:00:00", endDate)},
 	}
+	var companyClause string
+	companyClause, params = companyFilter(company, params)
 
 	var filterProductType string
 	if productType != "" {
@@ -56,7 +57,7 @@ func (o *Orders) GetChannelBreakdown(
 				IFNULL(NULLIF(TRIM(channel), ''), 'SIN CANAL') AS channel,
 				%s AS clasificacion
 			FROM `+"`crp-pro-dig-edd.mus_pro_digital_prd_tbls.FAC_EDD_ORDERS_TRN`"+`
-			WHERE company = @company
+			WHERE %s
 				%s
 				%s
 				%s
@@ -71,7 +72,7 @@ func (o *Orders) GetChannelBreakdown(
 		FROM base
 		GROUP BY channel
 		ORDER BY total DESC
-	`, clasificacionSQL, filterProductType, filterFulfillment, filterMarketplace, filterHour)
+	`, clasificacionSQL, companyClause, filterProductType, filterFulfillment, filterMarketplace, filterHour)
 
 	q := o.client.Query(query)
 	q.Parameters = params
@@ -114,10 +115,11 @@ func (o *Orders) GetOrdersHourly(
 	hourStart, hourEnd int,
 ) ([]*model.HourlyBucket, error) {
 	params := []bigquery.QueryParameter{
-		{Name: "company", Value: company},
 		{Name: "start", Value: fmt.Sprintf("%s 00:00:00", startDate)},
 		{Name: "end", Value: fmt.Sprintf("%s 00:00:00", endDate)},
 	}
+	var companyClause string
+	companyClause, params = companyFilter(company, params)
 
 	var filterProductType string
 	if productType != "" {
@@ -148,7 +150,7 @@ func (o *Orders) GetOrdersHourly(
 				EXTRACT(HOUR FROM ingestionTimestamp AT TIME ZONE 'America/Mexico_City') AS Hora,
 				%s AS clasificacion
 			FROM `+"`crp-pro-dig-edd.mus_pro_digital_prd_tbls.FAC_EDD_ORDERS_TRN`"+`
-			WHERE company = @company
+			WHERE %s
 				%s
 				%s
 				%s
@@ -166,7 +168,7 @@ func (o *Orders) GetOrdersHourly(
 		FROM base
 		GROUP BY Hora
 		ORDER BY Hora
-	`, clasificacionSQL, filterProductType, filterFulfillment, filterMarketplace, filterChannel, filterHour)
+	`, clasificacionSQL, companyClause, filterProductType, filterFulfillment, filterMarketplace, filterChannel, filterHour)
 
 	q := o.client.Query(query)
 	q.Parameters = params
